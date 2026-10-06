@@ -3,30 +3,149 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Vigil · Website Security Scanner</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<main>
-  <h1>Vigil</h1>
-  <p class="tag">Check a website's security headers, TLS, cookies, exposed files and email-spoofing protection.</p>
+<div class="cam-wrap">
+  <svg class="cam" viewBox="0 0 520 420" aria-hidden="true">
+    <defs>
+      <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ff3b3b" stop-opacity=".45"/>
+        <stop offset="1" stop-color="#ff3b3b" stop-opacity="0"/>
+      </linearGradient>
+      <radialGradient id="ball" cx=".4" cy=".35" r=".75">
+        <stop offset="0" stop-color="#2b2b2d"/>
+        <stop offset="1" stop-color="#040404"/>
+      </radialGradient>
+      <radialGradient id="glass" cx=".5" cy=".25" r=".85">
+        <stop offset="0" stop-color="#1a1a1c" stop-opacity=".15"/>
+        <stop offset=".7" stop-color="#0a0a0b" stop-opacity=".45"/>
+        <stop offset="1" stop-color="#000" stop-opacity=".85"/>
+      </radialGradient>
+      <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity=".22"/>
+        <stop offset=".6" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+      <radialGradient id="lens" cx=".4" cy=".35" r=".7">
+        <stop offset="0" stop-color="#3a2030"/>
+        <stop offset=".5" stop-color="#0d0a12"/>
+        <stop offset="1" stop-color="#000"/>
+      </radialGradient>
+      <clipPath id="dome"><path d="M40 92 A220 160 0 0 0 480 92 Z"/></clipPath>
+    </defs>
+    <!-- light cone, then the dome glass and lens on top of it -->
+    <g class="cam-head"><g class="cam-beam" fill="url(#beam)">
+      <polygon points="244,240 276,240 410,420 110,420" opacity=".35"/>
+      <polygon points="249,240 271,240 375,420 145,420" opacity=".5"/>
+      <polygon points="254,240 266,240 340,420 180,420" opacity=".7"/>
+    </g></g>
+    <path d="M40 92 A220 160 0 0 0 480 92 Z" fill="#0c0c0d"/>
+    <g clip-path="url(#dome)">
+      <g class="cam-head">
+        <circle cx="260" cy="172" r="92" fill="url(#ball)"/>
+        <circle cx="260" cy="212" r="40" fill="#141416"/>
+        <circle cx="260" cy="212" r="29" fill="url(#lens)"/>
+        <circle cx="260" cy="212" r="13" fill="#000"/>
+        <circle cx="252" cy="204" r="4.5" fill="#fff" opacity=".35"/>
+        <circle class="cam-led" cx="304" cy="152" r="5" fill="#ff2a2a"/>
+      </g>
+    </g>
+    <path d="M40 92 A220 160 0 0 0 480 92 Z" fill="url(#glass)"/>
+    <path d="M58 96 Q66 196 170 244 Q104 190 104 96 Z" fill="url(#shine)"/>
+    <ellipse cx="410" cy="140" rx="11" ry="34" transform="rotate(24 410 140)" fill="#fff" opacity=".07"/>
+  </svg>
+</div>
+<header class="nav">
+  <div class="brand"><span class="mark" aria-hidden="true"></span>Vigil</div>
+  <span class="nav-tag">Website security scanner</span>
+</header>
 
-  <form id="f">
-    <div class="row">
-      <input id="url" type="text" placeholder="example.com" autocomplete="off" required>
-      <button id="go" type="submit">Scan</button>
-    </div>
-    <label class="auth"><input id="auth" type="checkbox"> I own this site or have permission to test it.
-      Scans are passive and non-destructive, but they do request a handful of well-known file paths.</label>
-    <div id="err" class="err" role="alert"></div>
-  </form>
+<main>
+  <section class="hero">
+
+
+    <p class="eyebrow">Passive · Non-destructive scanning</p>
+    <h1>Website security,<br><span>graded in seconds</span></h1>
+    <p class="tag">Check a website's security headers, TLS, cookies, exposed files and email-spoofing protection.</p>
+
+    <form id="f">
+      <div class="row">
+        <textarea id="urls" rows="1" placeholder="example.com" autocomplete="off" spellcheck="false"
+                  aria-label="Websites to scan, one per line" aria-describedby="urls-hint"></textarea>
+        <button id="go" type="submit">Scan</button>
+      </div>
+      <div class="hint" id="urls-hint">
+        <span>Scanning several sites? Paste up to 10, one per line (Shift+Enter for a new line).</span>
+        <label class="file-btn"><input id="file" type="file" accept=".txt,.csv,text/plain,text/csv">Import list</label>
+      </div>
+
+      <details id="opts" class="opts">
+        <summary>Customize checks &amp; report</summary>
+        <div class="opts-grid">
+          <fieldset>
+            <legend>Checks to run</legend>
+            <label><input type="checkbox" name="check" value="transport" checked> HTTPS transport</label>
+            <label><input type="checkbox" name="check" value="tls" checked> TLS / certificate</label>
+            <label><input type="checkbox" name="check" value="headers" checked> Security headers</label>
+            <label><input type="checkbox" name="check" value="cookies" checked> Cookies</label>
+            <label><input type="checkbox" name="check" value="disclosure" checked> Information disclosure</label>
+            <label><input type="checkbox" name="check" value="exposure" checked> Exposed files</label>
+            <label><input type="checkbox" name="check" value="email_dns" checked> Email spoofing (SPF/DMARC)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Report sections</legend>
+            <label><input type="checkbox" name="section" value="summary" checked> Executive summary</label>
+            <label><input type="checkbox" name="section" value="details" checked> Findings, grouped by severity</label>
+            <label><input type="checkbox" name="section" value="passed" checked> Checks passed</label>
+            <label><input type="checkbox" name="section" value="methodology" checked> Methodology &amp; scope</label>
+          </fieldset>
+          <fieldset>
+            <legend>Report detail</legend>
+            <label class="stack">Include findings rated
+              <select id="min">
+                <option value="info">Info and above (everything)</option>
+                <option value="low">Low and above</option>
+                <option value="medium">Medium and above</option>
+                <option value="high">High and above</option>
+                <option value="critical">Critical only</option>
+              </select>
+            </label>
+            <label><input type="checkbox" id="evidence" checked> Include technical evidence</label>
+            <p class="muted">Report options apply to downloads and the online view. They don't change the score.</p>
+          </fieldset>
+        </div>
+      </details>
+
+      <label class="auth"><input id="auth" type="checkbox"> I own these sites or have permission to test them.
+        Scans are passive and non-destructive, but they do request a handful of well-known file paths.</label>
+      <div id="err" class="err" role="alert"></div>
+    </form>
+  </section>
 
   <section id="result" aria-live="polite"></section>
 
   <h2>Your recent scans</h2>
   <p class="muted">Kept only in this browser. Report links are private: anyone you share one with can view it.</p>
-  <table><thead><tr><th>Grade</th><th>Target</th><th>When</th><th></th></tr></thead><tbody id="hist"></tbody></table>
+  <div class="table-wrap">
+    <table><thead><tr><th>Grade</th><th>Target</th><th>When</th><th></th></tr></thead><tbody id="hist"></tbody></table>
+  </div>
 </main>
+
+<dialog id="preview" aria-labelledby="preview-title">
+  <div class="preview-bar">
+    <strong id="preview-title" tabindex="-1" autofocus>Report preview</strong>
+    <div class="report-actions">
+      <a class="btn btn-primary" id="pv-pdf" data-ext=".pdf" download>⬇ Download PDF</a>
+      <a class="btn btn-secondary" id="pv-docx" data-ext=".docx" download>⬇ Download Word</a>
+      <button class="btn btn-ghost" id="pv-close" type="button" aria-label="Close preview">✕</button>
+    </div>
+  </div>
+  <iframe id="pv-frame" title="Report preview"></iframe>
+  <p class="muted preview-note">The Word document has the same content and layout.
+    Preview not showing? <a id="pv-open" target="_blank" rel="noopener">Open it in a new tab</a>.</p>
+</dialog>
 
 <script src="/static/app.js"></script>
 </body>

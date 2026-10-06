@@ -8,6 +8,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup, escape
 
 from . import __version__
+from .export import by_severity
 from .models import ScanResult
 
 
@@ -22,6 +23,8 @@ _env = Environment(loader=PackageLoader("vigil", "templates"), autoescape=select
 _env.filters["md_code"] = _md_code
 
 
-def render_html(result: ScanResult, token: str | None = None) -> str:
-    """token: when served by the web app, show PDF/Word download buttons for this report."""
-    return _env.get_template("report.html").render(r=result, version=__version__, token=token)
+def render_html(result: ScanResult, token: str | None = None, query: str = "") -> str:
+    """token: when served by the web app, show PDF/Word download buttons for this report.
+    query: the report options (?sections=...) to carry over to those downloads."""
+    return _env.get_template("report.html").render(r=result, groups=by_severity(result.findings), version=__version__,
+                                                   token=token, query=query)

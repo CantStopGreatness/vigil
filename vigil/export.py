@@ -1,7 +1,8 @@
 """Downloadable reports (PDF and Word) meant to be handed over as-is, with no editing needed.
 
-Both formats are built from the same content (executive summary, findings overview,
-detailed findings, passed checks, methodology), so they always say the same thing.
+Both formats are built from the same content (executive summary, findings grouped by
+severity, passed checks, methodology), so they always say the same thing. The layout is
+compact so a typical report fits on one or two pages.
 
 Finding text can contain strings copied from the scanned site, which is untrusted.
 reportlab's Paragraph understands a small markup language (including <img> tags that
@@ -12,13 +13,14 @@ from __future__ import annotations
 
 import io
 import re
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 from . import __version__
-from .models import ScanResult, Severity
+from .models import Finding, ScanResult, Severity
 
 SEV_HEX = {
     Severity.CRITICAL: "B4232A", Severity.HIGH: "D9480F", Severity.MEDIUM: "A87400",
@@ -50,6 +52,8 @@ METHODOLOGY = [
 DISCLAIMER = ("This is an automated, non-intrusive posture check, not a penetration test. It made ordinary "
               "requests to publicly reachable addresses and sent no attack payloads. It does not find flaws in "
               "the site's own application code. Results reflect the site at the time of the scan.")
+WEIGHTS = ("Severity weights: critical −40, high −20, medium −8, low −3, info 0. "
+           "Any critical finding caps the score at 50.")
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff￾￿]")
 
@@ -72,6 +76,17 @@ def _evidence(text: str) -> str:
     return _clean(text).replace("\\n", "\n").strip()
 
 
+def _evidence_brief(text: str, limit: int = 200) -> str:
+    """Evidence squeezed onto one or two lines for the compact findings table."""
+    flat = " · ".join(line.strip() for line in _evidence(text).splitlines() if line.strip())
+    return flat if len(flat) <= limit else flat[:limit - 1] + "…"
+
+
+def by_severity(findings: list[Finding]) -> list[tuple[Severity, list[Finding]]]:
+    """Findings grouped by severity, most severe first, skipping empty levels."""
+    return [(s, g) for s in Severity if (g := [f for f in findings if f.severity is s])]
+
+
 def host_of(r: ScanResult) -> str:
     return urlsplit(r.final_url).hostname or r.final_url
 
@@ -87,6 +102,33 @@ def _when(r: ScanResult) -> str:
 def download_name(r: ScanResult, ext: str) -> str:
     host = re.sub(r"[^a-z0-9.-]+", "-", host_of(r).lower()).strip("-.") or "site"
     return f"vigil-report-{host}-{r.started_at[:10]}.{ext}"
+
+
+# Report sections a reader can switch off. Title block and scan notes always stay.
+SECTIONS = ("summary", "details", "passed", "methodology")
+
+
+@dataclass(frozen=True)
+class ReportOptions:
+    sections: frozenset[str] = frozenset(SECTIONS)
+    min_severity: Severity = Severity.INFO
+    evidence: bool = True
+
+    def scope_note(self) -> str | None:
+        if self.min_severity is Severity.INFO:
+            return None
+        return f"This report lists only findings rated {self.min_severity.value} or higher."
+
+
+FULL_REPORT = ReportOptions()
+
+
+def tailor(r: ScanResult, opts: ReportOptions) -> ScanResult:
+    """Drop findings below the chosen severity and, if asked, their evidence. Score and grade stay as scanned."""
+    keep = [f for f in r.findings if f.severity.rank <= opts.min_severity.rank]
+    if not opts.evidence:
+        keep = [replace(f, evidence="") for f in keep]
+    return replace(r, findings=keep)
 
 
 def _plural(n: int, word: str) -> str:
@@ -117,7 +159,8 @@ def executive_summary(r: ScanResult) -> list[str]:
 
 # --- PDF ---------------------------------------------------------------------
 
-def render_pdf(r: ScanResult) -> bytes:
+def render_pdf(r: ScanResult, opts: ReportOptions = FULL_REPORT) -> bytes:
+    r, on = tailor(r, opts), opts.sections
     # Bitstream Vera ships with reportlab and covers far more of Unicode than the built-in Helvetica.
     import reportlab
     from reportlab.lib import colors
@@ -129,7 +172,6 @@ def render_pdf(r: ScanResult) -> bytes:
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.platypus import (
-        KeepTogether,
         Paragraph,
         SimpleDocTemplate,
         Spacer,
@@ -144,25 +186,27 @@ def render_pdf(r: ScanResult) -> bytes:
     pdfmetrics.registerFontFamily("Vera", normal="Vera", bold="Vera-Bold", italic="Vera-Italic",
                                   boldItalic="Vera-BoldItalic")
 
-    width = LETTER[0] - 1.5 * inch - 12  # usable width: page minus margins minus the frame's 6pt padding
+    margin = 0.6 * inch
+    width = LETTER[0] - 2 * margin - 12  # usable width: page minus margins minus the frame's 6pt padding
     ink, muted, line, soft = (colors.HexColor(h) for h in ("#1C1C1A", "#6B6B66", "#DDDDD7", "#F4F4F1"))
 
     def style(name, **kw):
-        base = dict(fontName="Vera", fontSize=10, leading=14, textColor=ink)
+        base = dict(fontName="Vera", fontSize=9, leading=12.5, textColor=ink)
         return ParagraphStyle(name, **{**base, **kw})
 
-    s_title = style("title", fontName="Vera-Bold", fontSize=22, leading=27)
-    s_sub = style("sub", fontSize=10.5, textColor=muted)
-    s_h1 = style("h1", fontName="Vera-Bold", fontSize=14, leading=18, spaceBefore=14, spaceAfter=6)
-    s_h2 = style("h2", fontName="Vera-Bold", fontSize=11.5, leading=15, spaceAfter=3)
-    s_body = style("body", spaceAfter=6)
-    s_small = style("small", fontSize=8.5, leading=11.5, textColor=muted)
-    s_cell = style("cell", fontSize=9, leading=12)
-    s_label = style("label", fontName="Vera-Bold", fontSize=8, leading=11, textColor=muted, spaceBefore=5)
-    s_ev = style("ev", fontName="Courier", fontSize=8, leading=10.5, wordWrap="CJK")
-    s_grade = style("grade", fontName="Vera-Bold", fontSize=40, leading=44, textColor=colors.white,
+    # Sized to keep a typical report to one or two pages.
+    s_title = style("title", fontName="Vera-Bold", fontSize=18, leading=22)
+    s_url = style("url", fontName="Vera-Bold", fontSize=10.5, leading=14)
+    s_sub = style("sub", fontSize=8.5, leading=12, textColor=muted)
+    s_h1 = style("h1", fontName="Vera-Bold", fontSize=12, leading=15, spaceBefore=10, spaceAfter=4)
+    s_body = style("body", spaceAfter=3)
+    s_small = style("small", fontSize=7.5, leading=10, textColor=muted)
+    s_cell = style("cell", fontSize=8.5, leading=11)
+    s_group = style("group", fontName="Vera-Bold", fontSize=8.5, leading=11, textColor=colors.white)
+    s_ev = style("ev", fontName="Courier", fontSize=7.5, leading=9.5, textColor=muted, wordWrap="CJK")
+    s_grade = style("grade", fontName="Vera-Bold", fontSize=30, leading=34, textColor=colors.white,
                     alignment=TA_CENTER)
-    s_grade_sub = style("gradesub", fontSize=9, leading=12, textColor=colors.white, alignment=TA_CENTER)
+    s_grade_sub = style("gradesub", fontSize=8, leading=10, textColor=colors.white, alignment=TA_CENTER)
 
     def rich(text: str) -> str:
         out = []
@@ -176,100 +220,79 @@ def render_pdf(r: ScanResult) -> bytes:
 
     story = []
 
-    # Header block: title on the left, grade badge on the right.
-    title = [Paragraph("Website Security Report", s_title), Spacer(1, 4),
-             Paragraph(escape(_clean(r.final_url)), style("url", fontName="Vera-Bold", fontSize=11.5, leading=15)),
-             Spacer(1, 3),
+    # Header: title on the left, grade badge on the right.
+    title = [Paragraph("Website Security Report", s_title), Spacer(1, 2),
+             Paragraph(escape(_clean(r.final_url)), s_url),
              Paragraph(f"Scanned {escape(_when(r))} &nbsp;·&nbsp; Vigil {__version__}", s_sub)]
     badge = Table([[Paragraph(r.grade, s_grade)], [Paragraph(f"{r.score} / 100", s_grade_sub)]],
-                  colWidths=[1.15 * inch], rowHeights=[0.62 * inch, 0.3 * inch])
+                  colWidths=[0.95 * inch], rowHeights=[0.48 * inch, 0.24 * inch])
     badge.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#" + GRADE_HEX.get(r.grade, "6B6B66"))),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
-    head = Table([[title, badge]], colWidths=[width - 1.4 * inch, 1.4 * inch])
+    head = Table([[title, badge]], colWidths=[width - 1.1 * inch, 1.1 * inch])
     head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
                               ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [head, Spacer(1, 14)]
+    story += [head, Spacer(1, 8)]
 
-    # Severity counts strip.
+    # Severity counts on one line.
     counts = r.summary()
-    strip = Table(
-        [[Paragraph(f'<font size="16" name="Vera-Bold" color="#{SEV_HEX[s]}">{counts[s.value]}</font>', s_cell)
-          for s in Severity],
-         [Paragraph(s.value.capitalize(), s_small) for s in Severity]],
-        colWidths=[width / 5] * 5)
+    strip = Table([[Paragraph(f'<font size="12" name="Vera-Bold" color="#{SEV_HEX[s]}">{counts[s.value]}</font>'
+                              f'&nbsp; {s.value.capitalize()}', s_cell) for s in Severity]],
+                  colWidths=[width / 5] * 5)
     strip.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), soft), ("BOX", (0, 0), (-1, -1), 0.5, line),
-        ("LINEBEFORE", (1, 0), (-1, -1), 0.5, line), ("LEFTPADDING", (0, 0), (-1, -1), 10),
-        ("TOPPADDING", (0, 0), (-1, 0), 8), ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+        ("LINEBEFORE", (1, 0), (-1, -1), 0.5, line), ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story += [strip]
+    if note := opts.scope_note():
+        story += [Spacer(1, 4), Paragraph(escape(note), s_small)]
 
-    story.append(Paragraph("Executive summary", s_h1))
-    story += [Paragraph(escape(_clean(p)), s_body) for p in executive_summary(r)]
+    if "summary" in on:
+        story.append(Paragraph("Executive summary", s_h1))
+        story += [Paragraph(escape(_clean(p)), s_body) for p in executive_summary(r)]
 
-    findings = r.findings
-    if findings:
-        story.append(Paragraph("Findings at a glance", s_h1))
-        rows = [[Paragraph("<b>#</b>", s_cell), Paragraph("<b>Severity</b>", s_cell),
-                 Paragraph("<b>Finding</b>", s_cell), Paragraph("<b>Area</b>", s_cell),
-                 Paragraph("<b>Fix by</b>", s_cell)]]
-        for i, f in enumerate(findings, 1):
-            rows.append([Paragraph(str(i), s_cell), Paragraph(sev_tag(f.severity), s_cell),
-                         Paragraph(escape(_clean(f.title)), s_cell), Paragraph(escape(f.check), s_cell),
-                         Paragraph(TIMELINE[f.severity], s_cell)])
-        t = Table(rows, colWidths=[0.35 * inch, 0.95 * inch, width - 4.0 * inch, 1.5 * inch, 1.2 * inch], repeatRows=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), soft), ("LINEBELOW", (0, 0), (-1, -1), 0.5, line),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ]))
-        story.append(t)
-
-        story.append(Paragraph("Detailed findings", s_h1))
-        for i, f in enumerate(findings, 1):
-            body = [Paragraph(f"{sev_tag(f.severity)} &nbsp;<font color='#6B6B66'>· {escape(f.check)} · fix "
-                              f"{TIMELINE[f.severity].lower()}</font>", s_cell),
-                    Spacer(1, 2),
-                    Paragraph(f"{i}. {escape(_clean(f.title))}", s_h2),
-                    Paragraph("WHAT WE FOUND", s_label), Paragraph(rich(f.description), s_cell)]
-            if f.evidence:
-                ev = Table([[Paragraph(escape(_evidence(f.evidence)).replace("\n", "<br/>"), s_ev)]],
-                           colWidths=[width - 0.06 * inch - 24])
-                ev.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), soft),
-                                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                                        ("TOPPADDING", (0, 0), (-1, -1), 4),
-                                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
-                body += [Paragraph("EVIDENCE", s_label), ev]
-            if f.recommendation:
-                body += [Paragraph("HOW TO FIX", s_label), Paragraph(rich(f.recommendation), s_cell)]
-            card = Table([["", body]], colWidths=[0.06 * inch, width - 0.06 * inch])
-            card.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#" + SEV_HEX[f.severity])),
-                ("BOX", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (1, 0), (1, 0), 12), ("RIGHTPADDING", (1, 0), (1, 0), 12),
-                ("TOPPADDING", (1, 0), (1, 0), 9), ("BOTTOMPADDING", (1, 0), (1, 0), 10),
-                ("LEFTPADDING", (0, 0), (0, 0), 0), ("RIGHTPADDING", (0, 0), (0, 0), 0),
+    # Findings grouped by severity: one coloured header per level, then a compact row per finding.
+    if r.findings and "details" in on:
+        story.append(Paragraph("Findings", s_h1))
+        for sev, group in by_severity(r.findings):
+            rows = [[Paragraph(f"{sev.value.upper()} &nbsp;·&nbsp; {_plural(len(group), 'finding')} &nbsp;·&nbsp; "
+                               f"fix {TIMELINE[sev].lower()}", s_group), ""]]
+            for f in group:
+                what = [Paragraph(rich(f.description), s_cell)]
+                if f.recommendation:
+                    what.append(Paragraph("<b>Fix:</b> " + rich(f.recommendation), s_cell))
+                if f.evidence:
+                    what.append(Paragraph(escape(_evidence_brief(f.evidence)), s_ev))
+                rows.append([[Paragraph(f"<b>{escape(_clean(f.title))}</b>", s_cell),
+                              Paragraph(escape(f.check), s_small)], what])
+            t = Table(rows, colWidths=[1.9 * inch, width - 1.9 * inch], repeatRows=1)
+            t.setStyle(TableStyle([
+                ("SPAN", (0, 0), (-1, 0)), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#" + SEV_HEX[sev])),
+                ("LINEBELOW", (0, 1), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ]))
-            story += [KeepTogether(card), Spacer(1, 8)]
+            story += [t, Spacer(1, 6)]
 
-    if r.passed:
+    if r.passed and "passed" in on:
         story.append(Paragraph("Checks passed", s_h1))
-        story += [Paragraph(f'<font color="#2F7D4F">✓</font>&nbsp; {escape(p)}', s_body) for p in r.passed]
+        story.append(Paragraph('<font color="#2F7D4F">✓</font>&nbsp; ' + " &nbsp;·&nbsp; ".join(map(escape, r.passed)),
+                               s_body))
     if r.errors:
         story.append(Paragraph("Scan notes", s_h1))
         story += [Paragraph(escape(_clean(e)), s_cell) for e in r.errors]
 
-    story.append(Paragraph("Methodology and scope", s_h1))
-    meth = Table([[Paragraph(f"<b>{escape(n)}</b>", s_cell), Paragraph(escape(d), s_cell)] for n, d in METHODOLOGY],
-                 colWidths=[1.9 * inch, width - 1.9 * inch])
-    meth.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                              ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
-    story += [meth, Spacer(1, 8), Paragraph(escape(DISCLAIMER), s_small),
-              Spacer(1, 4), Paragraph("Severity weights: critical −40, high −20, medium −8, low −3, info 0. "
-                                      "Any critical finding caps the score at 50.", s_small)]
+    if "methodology" in on:
+        story.append(Paragraph("Methodology and scope", s_h1))
+        meth = Table([[Paragraph(f"<b>{escape(n)}</b>", s_small), Paragraph(escape(d), s_small)]
+                      for n, d in METHODOLOGY], colWidths=[1.6 * inch, width - 1.6 * inch])
+        meth.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+        story += [meth, Spacer(1, 6), Paragraph(escape(DISCLAIMER) + " " + escape(WEIGHTS), s_small)]
 
     class NumberedCanvas(rl_canvas.Canvas):
         """Two-pass canvas so the footer can say 'Page X of Y'."""
@@ -289,16 +312,16 @@ def render_pdf(r: ScanResult) -> bytes:
                 self.setFont("Vera", 8)
                 self.setFillColor(muted)
                 self.setStrokeColor(line)
-                self.line(0.75 * inch, 0.6 * inch, LETTER[0] - 0.75 * inch, 0.6 * inch)
-                self.drawString(0.75 * inch, 0.42 * inch, f"Security report · {_clean(host_of(r))}")
-                self.drawRightString(LETTER[0] - 0.75 * inch, 0.42 * inch, f"Page {self._pageNumber} of {total}")
+                self.line(margin, 0.55 * inch, LETTER[0] - margin, 0.55 * inch)
+                self.drawString(margin, 0.4 * inch, f"Security report · {_clean(host_of(r))}")
+                self.drawRightString(LETTER[0] - margin, 0.4 * inch, f"Page {self._pageNumber} of {total}")
                 super().showPage()
             super().save()
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=LETTER, leftMargin=0.75 * inch, rightMargin=0.75 * inch, topMargin=0.7 * inch,
-        bottomMargin=0.85 * inch, title=f"Security report: {_clean(host_of(r))}", author="Vigil",
+        buf, pagesize=LETTER, leftMargin=margin, rightMargin=margin, topMargin=0.55 * inch,
+        bottomMargin=0.75 * inch, title=f"Security report: {_clean(host_of(r))}", author="Vigil",
         subject="Website security posture scan", creator=f"Vigil {__version__}",
     )
     doc.build(story, canvasmaker=NumberedCanvas)
@@ -307,7 +330,8 @@ def render_pdf(r: ScanResult) -> bytes:
 
 # --- Word (.docx) --------------------------------------------------------------
 
-def render_docx(r: ScanResult) -> bytes:
+def render_docx(r: ScanResult, opts: ReportOptions = FULL_REPORT) -> bytes:
+    r, on = tailor(r, opts), opts.sections
     from docx import Document
     from docx.enum.section import WD_ORIENT
     from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -339,9 +363,6 @@ def render_docx(r: ScanResult) -> bytes:
             b.append(e)
         tbl_pr.append(b)
 
-    def keep_with_next(p) -> None:
-        p.paragraph_format.keep_with_next = True
-
     def add_rich(p, text: str, size: float = 10) -> None:
         for chunk, code in _spans(text):
             run = p.add_run(chunk)
@@ -368,23 +389,23 @@ def render_docx(r: ScanResult) -> bytes:
     sec.orientation = WD_ORIENT.PORTRAIT
     sec.page_width, sec.page_height = Inches(8.5), Inches(11)
     for side in ("left_margin", "right_margin"):
-        setattr(sec, side, Inches(0.85))
-    sec.top_margin, sec.bottom_margin = Inches(0.8), Inches(0.8)
+        setattr(sec, side, Inches(0.6))
+    sec.top_margin, sec.bottom_margin = Inches(0.55), Inches(0.6)
 
     normal = doc.styles["Normal"]
     normal.font.name = "Calibri"
-    normal.font.size = Pt(10.5)
+    normal.font.size = Pt(9.5)
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
-    normal.paragraph_format.space_after = Pt(4)
-    for name, size in (("Heading 1", 15), ("Heading 2", 12)):
+    normal.paragraph_format.space_after = Pt(2)
+    for name, size in (("Heading 1", 12.5), ("Heading 2", 11)):
         st = doc.styles[name]
         st.font.name, st.font.size, st.font.bold = "Calibri", Pt(size), True
         st.font.color.rgb = rgb("1C1C1A")
         rfonts = st.element.rPr.rFonts  # theme fonts would override Calibri, so drop them
         for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
             rfonts.attrib.pop(qn(attr), None)
-        st.paragraph_format.space_before = Pt(14 if name == "Heading 1" else 4)
-        st.paragraph_format.space_after = Pt(4)
+        st.paragraph_format.space_before = Pt(10 if name == "Heading 1" else 4)
+        st.paragraph_format.space_after = Pt(3)
 
     props = doc.core_properties
     props.title = f"Security report: {_clean(host_of(r))}"
@@ -405,145 +426,106 @@ def render_docx(r: ScanResult) -> bytes:
     head = doc.add_table(rows=1, cols=2)
     head.alignment = WD_TABLE_ALIGNMENT.CENTER
     left, right = head.rows[0].cells
-    left.width, right.width = Inches(5.6), Inches(1.2)
+    left.width, right.width = Inches(6.2), Inches(1.1)
     p = left.paragraphs[0]
     run = p.add_run("Website Security Report")
-    run.bold, run.font.size = True, Pt(22)
+    run.bold, run.font.size = True, Pt(18)
     p = left.add_paragraph()
     run = p.add_run(_clean(r.final_url))
-    run.bold, run.font.size = True, Pt(12)
+    run.bold, run.font.size = True, Pt(11)
     p = left.add_paragraph()
     run = p.add_run(f"Scanned {_when(r)}  ·  Vigil {__version__}")
-    run.font.size, run.font.color.rgb = Pt(9.5), rgb("6B6B66")
+    run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
     shade(right, GRADE_HEX.get(r.grade, "6B6B66"))
     p = right.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(r.grade)
-    run.bold, run.font.size, run.font.color.rgb = True, Pt(36), rgb("FFFFFF")
+    run.bold, run.font.size, run.font.color.rgb = True, Pt(28), rgb("FFFFFF")
     p = right.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(f"{r.score} / 100")
-    run.font.size, run.font.color.rgb = Pt(9.5), rgb("FFFFFF")
-    doc.add_paragraph()
+    run.font.size, run.font.color.rgb = Pt(8.5), rgb("FFFFFF")
+    doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
-    # Severity counts strip.
+    # Severity counts on one line.
     counts = r.summary()
-    strip = doc.add_table(rows=2, cols=5)
+    strip = doc.add_table(rows=1, cols=5)
     borders(strip)
     for i, s in enumerate(Severity):
-        top, bottom = strip.cell(0, i), strip.cell(1, i)
-        for c in (top, bottom):
-            shade(c, "F4F4F1")
-        run = top.paragraphs[0].add_run(str(counts[s.value]))
-        run.bold, run.font.size, run.font.color.rgb = True, Pt(16), rgb(SEV_HEX[s])
-        run = bottom.paragraphs[0].add_run(s.value.capitalize())
-        run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
+        cell = strip.cell(0, i)
+        shade(cell, "F4F4F1")
+        run = cell.paragraphs[0].add_run(str(counts[s.value]))
+        run.bold, run.font.size, run.font.color.rgb = True, Pt(12), rgb(SEV_HEX[s])
+        run = cell.paragraphs[0].add_run(f"  {s.value.capitalize()}")
+        run.font.size = Pt(8.5)
+    if note := opts.scope_note():
+        run = doc.add_paragraph().add_run(note)
+        run.font.size, run.font.color.rgb = Pt(8), rgb("6B6B66")
 
-    doc.add_heading("Executive summary", level=1)
-    for para in executive_summary(r):
-        doc.add_paragraph(_clean(para))
+    if "summary" in on:
+        doc.add_heading("Executive summary", level=1)
+        for para in executive_summary(r):
+            doc.add_paragraph(_clean(para))
 
-    findings = r.findings
-    if findings:
-        doc.add_heading("Findings at a glance", level=1)
-        t = doc.add_table(rows=1, cols=5)
-        borders(t)
-        widths = (Inches(0.35), Inches(0.95), Inches(2.85), Inches(1.6), Inches(1.05))
-        for cell, label, w in zip(t.rows[0].cells, ("#", "Severity", "Finding", "Area", "Fix by"), widths,
-                                  strict=True):
-            cell.width = w
-            shade(cell, "F4F4F1")
-            run = cell.paragraphs[0].add_run(label)
-            run.bold, run.font.size = True, Pt(9)
-        # Repeat the header row on every page.
-        tr_pr = t.rows[0]._tr.get_or_add_trPr()
-        hdr = OxmlElement("w:tblHeader")
-        hdr.set(qn("w:val"), "true")
-        tr_pr.append(hdr)
-        for i, f in enumerate(findings, 1):
-            cells = t.add_row().cells
-            values = (str(i), f.severity.value.upper(), _clean(f.title), f.check, TIMELINE[f.severity])
-            for j, (cell, value, w) in enumerate(zip(cells, values, widths, strict=True)):
-                cell.width = w
-                run = cell.paragraphs[0].add_run(value)
-                run.font.size = Pt(9)
-                if j == 1:
-                    run.bold, run.font.color.rgb = True, rgb(SEV_HEX[f.severity])
-
-        doc.add_heading("Detailed findings", level=1)
-        for i, f in enumerate(findings, 1):
-            card = doc.add_table(rows=1, cols=2)
-            borders(card, inside=False)
-            bar, body = card.rows[0].cells
-            bar.width, body.width = Inches(0.08), Inches(6.72)
-            shade(bar, SEV_HEX[f.severity])
-            p = body.paragraphs[0]
-            run = p.add_run(f.severity.value.upper())
-            run.bold, run.font.size, run.font.color.rgb = True, Pt(8.5), rgb(SEV_HEX[f.severity])
-            run = p.add_run(f"   ·  {f.check}  ·  fix {TIMELINE[f.severity].lower()}")
-            run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
-            keep_with_next(p)
-            p = body.add_paragraph()
-            run = p.add_run(f"{i}. {_clean(f.title)}")
-            run.bold, run.font.size = True, Pt(12)
-            keep_with_next(p)
-
-            def label(text: str, body=body) -> None:
-                lp = body.add_paragraph()
-                lp.paragraph_format.space_before, lp.paragraph_format.space_after = Pt(4), Pt(1)
-                lr = lp.add_run(text)
-                lr.bold, lr.font.size, lr.font.color.rgb = True, Pt(8), rgb("6B6B66")
-                keep_with_next(lp)
-
-            label("WHAT WE FOUND")
-            add_rich(body.add_paragraph(), f.description)
-            if f.evidence:
-                label("EVIDENCE")
-                ep = body.add_paragraph()
-                er = ep.add_run(_evidence(f.evidence))
-                er.font.name, er.font.size = "Consolas", Pt(8.5)
-                p_pr = ep._p.get_or_add_pPr()
-                shd = OxmlElement("w:shd")
-                shd.set(qn("w:val"), "clear")
-                shd.set(qn("w:fill"), "F4F4F1")
-                p_pr.append(shd)
-            if f.recommendation:
-                label("HOW TO FIX")
-                add_rich(body.add_paragraph(), f.recommendation)
-            # Don't split a finding across pages.
-            tr_pr = card.rows[0]._tr.get_or_add_trPr()
-            cant = OxmlElement("w:cantSplit")
-            cant.set(qn("w:val"), "true")
-            tr_pr.append(cant)
+    # Findings grouped by severity: one coloured header per level, then a compact row per finding.
+    if r.findings and "details" in on:
+        doc.add_heading("Findings", level=1)
+        for sev, group in by_severity(r.findings):
+            t = doc.add_table(rows=1, cols=2)
+            borders(t, inside=False)
+            header = t.cell(0, 0).merge(t.cell(0, 1))
+            shade(header, SEV_HEX[sev])
+            run = header.paragraphs[0].add_run(
+                f"{sev.value.upper()}  ·  {_plural(len(group), 'finding')}  ·  fix {TIMELINE[sev].lower()}")
+            run.bold, run.font.size, run.font.color.rgb = True, Pt(9), rgb("FFFFFF")
+            hdr = OxmlElement("w:tblHeader")  # repeat the level's header if the group spills onto a new page
+            hdr.set(qn("w:val"), "true")
+            t.rows[0]._tr.get_or_add_trPr().append(hdr)
+            for f in group:
+                a, b = t.add_row().cells
+                a.width, b.width = Inches(1.9), Inches(5.4)
+                run = a.paragraphs[0].add_run(_clean(f.title))
+                run.bold, run.font.size = True, Pt(9.5)
+                run = a.add_paragraph().add_run(f.check)
+                run.font.size, run.font.color.rgb = Pt(8), rgb("6B6B66")
+                add_rich(b.paragraphs[0], f.description, 9.5)
+                if f.recommendation:
+                    p = b.add_paragraph()
+                    p.add_run("Fix: ").bold = True
+                    add_rich(p, f.recommendation, 9.5)
+                if f.evidence:
+                    run = b.add_paragraph().add_run(_evidence_brief(f.evidence))
+                    run.font.name, run.font.size, run.font.color.rgb = "Consolas", Pt(8), rgb("6B6B66")
+                cant = OxmlElement("w:cantSplit")  # keep each finding on one page
+                cant.set(qn("w:val"), "true")
+                t.rows[-1]._tr.get_or_add_trPr().append(cant)
             doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
-    if r.passed:
+    if r.passed and "passed" in on:
         doc.add_heading("Checks passed", level=1)
-        for name in r.passed:
-            p = doc.add_paragraph()
-            run = p.add_run("✓  ")
-            run.bold, run.font.color.rgb = True, rgb("2F7D4F")
-            p.add_run(name)
+        p = doc.add_paragraph()
+        run = p.add_run("✓  ")
+        run.bold, run.font.color.rgb = True, rgb("2F7D4F")
+        p.add_run("  ·  ".join(r.passed))
     if r.errors:
         doc.add_heading("Scan notes", level=1)
         for e in r.errors:
             doc.add_paragraph(_clean(e))
 
-    doc.add_heading("Methodology and scope", level=1)
-    meth = doc.add_table(rows=0, cols=2)
-    borders(meth)
-    for name, desc in METHODOLOGY:
-        a, b = meth.add_row().cells
-        a.width, b.width = Inches(1.9), Inches(4.9)
-        run = a.paragraphs[0].add_run(name)
-        run.bold, run.font.size = True, Pt(9)
-        b.paragraphs[0].add_run(desc).font.size = Pt(9)
-    for text in (DISCLAIMER, "Severity weights: critical −40, high −20, medium −8, low −3, info 0. "
-                             "Any critical finding caps the score at 50."):
+    if "methodology" in on:
+        doc.add_heading("Methodology and scope", level=1)
+        meth = doc.add_table(rows=0, cols=2)
+        borders(meth)
+        for name, desc in METHODOLOGY:
+            a, b = meth.add_row().cells
+            a.width, b.width = Inches(1.7), Inches(5.6)
+            run = a.paragraphs[0].add_run(name)
+            run.bold, run.font.size = True, Pt(8)
+            b.paragraphs[0].add_run(desc).font.size = Pt(8)
         p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(6)
-        run = p.add_run(text)
-        run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
+        p.paragraph_format.space_before = Pt(4)
+        run = p.add_run(f"{DISCLAIMER} {WEIGHTS}")
+        run.font.size, run.font.color.rgb = Pt(8), rgb("6B6B66")
 
     buf = io.BytesIO()
     doc.save(buf)
