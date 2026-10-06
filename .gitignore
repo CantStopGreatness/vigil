@@ -13,3 +13,4 @@ venv/
 /report.json
 .DS_Store
 .env
+graphify-out/

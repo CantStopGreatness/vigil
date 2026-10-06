@@ -135,7 +135,6 @@ Only scan websites you own or have explicit permission to test. Vigil is passive
 - [ ] CVE matching: map detected versions (`nginx/1.18.0`) to known CVEs via the NVD API
 - [ ] Postgres + Redis (shared rate limits) + background job queue so the web app can run multiple workers
 - [ ] Batch scanning from a CSV of domains, with a comparison dashboard
-- [ ] PDF export of reports
 - [ ] Scheduled re-scans and alerts when a grade drops (e.g. cert about to expire)
 
 ## What I learned
