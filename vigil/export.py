@@ -1,0 +1,550 @@
+"""Downloadable reports (PDF and Word) meant to be handed over as-is, with no editing needed.
+
+Both formats are built from the same content (executive summary, findings overview,
+detailed findings, passed checks, methodology), so they always say the same thing.
+
+Finding text can contain strings copied from the scanned site, which is untrusted.
+reportlab's Paragraph understands a small markup language (including <img> tags that
+read local files), so every string is XML-escaped before it goes anywhere near it.
+"""
+
+from __future__ import annotations
+
+import io
+import re
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlsplit
+from xml.sax.saxutils import escape
+
+from . import __version__
+from .models import ScanResult, Severity
+
+SEV_HEX = {
+    Severity.CRITICAL: "B4232A", Severity.HIGH: "D9480F", Severity.MEDIUM: "A87400",
+    Severity.LOW: "3B6FB6", Severity.INFO: "6B6B66",
+}
+GRADE_HEX = {"A": "2F7D4F", "B": "2F7D4F", "C": "A87400", "D": "D9480F", "F": "B4232A"}
+TIMELINE = {
+    Severity.CRITICAL: "Immediately", Severity.HIGH: "Within 1 week", Severity.MEDIUM: "Within 1 month",
+    Severity.LOW: "When convenient", Severity.INFO: "Optional",
+}
+VERDICT = {
+    "A": "The site is well configured, and only minor or optional improvements were identified.",
+    "B": "The site is in good shape, with a few improvements recommended.",
+    "C": "The site has a reasonable baseline but several gaps that should be addressed.",
+    "D": "The site has significant weaknesses that should be fixed soon.",
+    "F": "The site has serious security problems that need immediate attention.",
+}
+METHODOLOGY = [
+    ("HTTPS transport", "Whether the site is served over HTTPS and whether plain-HTTP visitors are redirected."),
+    ("TLS / certificate", "Certificate validity and expiry, and whether obsolete TLS 1.0/1.1 is still accepted."),
+    ("Security headers", "Browser protections: HSTS, Content-Security-Policy, clickjacking, MIME sniffing, "
+                         "Referrer-Policy, Permissions-Policy."),
+    ("Cookies", "Secure, HttpOnly and SameSite attributes on cookies set by the site."),
+    ("Information disclosure", "Software version numbers revealed in response headers or page markup."),
+    ("Exposed files", "Well-known sensitive files and admin pages (.git, .env, backups, phpinfo, phpMyAdmin), "
+                      "confirmed by content rather than status code alone."),
+    ("Email spoofing (SPF/DMARC)", "DNS records that stop others from sending email as the domain."),
+]
+DISCLAIMER = ("This is an automated, non-intrusive posture check, not a penetration test. It made ordinary "
+              "requests to publicly reachable addresses and sent no attack payloads. It does not find flaws in "
+              "the site's own application code. Results reflect the site at the time of the scan.")
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff￾￿]")
+
+
+# --- shared content ----------------------------------------------------------
+
+def _clean(text: str) -> str:
+    """Drop characters that are illegal in XML (both PDF markup and .docx are XML underneath)."""
+    return _CONTROL.sub("", text or "")
+
+
+def _spans(text: str) -> list[tuple[str, bool]]:
+    """Split `code` spans out of text: [(chunk, is_code), ...]."""
+    parts = re.split(r"`([^`]+)`", _clean(text))
+    return [(p, i % 2 == 1) for i, p in enumerate(parts) if p]
+
+
+def _evidence(text: str) -> str:
+    """Evidence stores line breaks as a literal backslash-n (so it stays one line in terminals)."""
+    return _clean(text).replace("\\n", "\n").strip()
+
+
+def host_of(r: ScanResult) -> str:
+    return urlsplit(r.final_url).hostname or r.final_url
+
+
+def _when(r: ScanResult) -> str:
+    try:
+        dt = datetime.fromisoformat(r.started_at)
+    except ValueError:
+        return r.started_at
+    return f"{dt.day} {dt:%B %Y, %H:%M} UTC"
+
+
+def download_name(r: ScanResult, ext: str) -> str:
+    host = re.sub(r"[^a-z0-9.-]+", "-", host_of(r).lower()).strip("-.") or "site"
+    return f"vigil-report-{host}-{r.started_at[:10]}.{ext}"
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def executive_summary(r: ScanResult) -> list[str]:
+    counts = r.summary()
+    issues = [f"{counts[s.value]} {s.value}" for s in Severity if s is not Severity.INFO and counts[s.value]]
+    paras = [f"{host_of(r)} scored {r.score} out of 100 (grade {r.grade}) in an automated security scan on "
+             f"{_when(r)}. {VERDICT.get(r.grade, '')}"]
+    if issues:
+        listed = ", ".join(issues[:-1]) + (" and " if len(issues) > 1 else "") + issues[-1]
+        n = sum(counts[s.value] for s in Severity if s is not Severity.INFO)
+        line = f"The scan found {_plural(n, 'issue')}: {listed}."
+    else:
+        line = "The scan found no security issues."
+    if counts["info"]:
+        line += f" It also made {_plural(counts['info'], 'informational suggestion')}."
+    paras.append(line)
+    urgent = [f.title for f in r.findings if f.severity in (Severity.CRITICAL, Severity.HIGH)]
+    if urgent:
+        paras.append("Fix first: " + "; ".join(urgent[:5]) + ("; and others listed below." if len(urgent) > 5 else "."))
+    if r.passed:
+        paras.append("No issues were found in: " + ", ".join(r.passed) + ".")
+    return paras
+
+
+# --- PDF ---------------------------------------------------------------------
+
+def render_pdf(r: ScanResult) -> bytes:
+    # Bitstream Vera ships with reportlab and covers far more of Unicode than the built-in Helvetica.
+    import reportlab
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.platypus import (
+        KeepTogether,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+    fonts = Path(reportlab.__file__).parent / "fonts"
+    for name, file in (("Vera", "Vera.ttf"), ("Vera-Bold", "VeraBd.ttf"), ("Vera-Italic", "VeraIt.ttf"),
+                       ("Vera-BoldItalic", "VeraBI.ttf")):
+        if name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(name, str(fonts / file)))
+    pdfmetrics.registerFontFamily("Vera", normal="Vera", bold="Vera-Bold", italic="Vera-Italic",
+                                  boldItalic="Vera-BoldItalic")
+
+    width = LETTER[0] - 1.5 * inch - 12  # usable width: page minus margins minus the frame's 6pt padding
+    ink, muted, line, soft = (colors.HexColor(h) for h in ("#1C1C1A", "#6B6B66", "#DDDDD7", "#F4F4F1"))
+
+    def style(name, **kw):
+        base = dict(fontName="Vera", fontSize=10, leading=14, textColor=ink)
+        return ParagraphStyle(name, **{**base, **kw})
+
+    s_title = style("title", fontName="Vera-Bold", fontSize=22, leading=27)
+    s_sub = style("sub", fontSize=10.5, textColor=muted)
+    s_h1 = style("h1", fontName="Vera-Bold", fontSize=14, leading=18, spaceBefore=14, spaceAfter=6)
+    s_h2 = style("h2", fontName="Vera-Bold", fontSize=11.5, leading=15, spaceAfter=3)
+    s_body = style("body", spaceAfter=6)
+    s_small = style("small", fontSize=8.5, leading=11.5, textColor=muted)
+    s_cell = style("cell", fontSize=9, leading=12)
+    s_label = style("label", fontName="Vera-Bold", fontSize=8, leading=11, textColor=muted, spaceBefore=5)
+    s_ev = style("ev", fontName="Courier", fontSize=8, leading=10.5, wordWrap="CJK")
+    s_grade = style("grade", fontName="Vera-Bold", fontSize=40, leading=44, textColor=colors.white,
+                    alignment=TA_CENTER)
+    s_grade_sub = style("gradesub", fontSize=9, leading=12, textColor=colors.white, alignment=TA_CENTER)
+
+    def rich(text: str) -> str:
+        out = []
+        for chunk, code in _spans(text):
+            chunk = escape(chunk)
+            out.append(f'<font name="Courier" size="9">{chunk}</font>' if code else chunk)
+        return "".join(out)
+
+    def sev_tag(sev: Severity) -> str:
+        return f'<font name="Vera-Bold" color="#{SEV_HEX[sev]}">{sev.value.upper()}</font>'
+
+    story = []
+
+    # Header block: title on the left, grade badge on the right.
+    title = [Paragraph("Website Security Report", s_title), Spacer(1, 4),
+             Paragraph(escape(_clean(r.final_url)), style("url", fontName="Vera-Bold", fontSize=11.5, leading=15)),
+             Spacer(1, 3),
+             Paragraph(f"Scanned {escape(_when(r))} &nbsp;·&nbsp; Vigil {__version__}", s_sub)]
+    badge = Table([[Paragraph(r.grade, s_grade)], [Paragraph(f"{r.score} / 100", s_grade_sub)]],
+                  colWidths=[1.15 * inch], rowHeights=[0.62 * inch, 0.3 * inch])
+    badge.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#" + GRADE_HEX.get(r.grade, "6B6B66"))),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    head = Table([[title, badge]], colWidths=[width - 1.4 * inch, 1.4 * inch])
+    head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    story += [head, Spacer(1, 14)]
+
+    # Severity counts strip.
+    counts = r.summary()
+    strip = Table(
+        [[Paragraph(f'<font size="16" name="Vera-Bold" color="#{SEV_HEX[s]}">{counts[s.value]}</font>', s_cell)
+          for s in Severity],
+         [Paragraph(s.value.capitalize(), s_small) for s in Severity]],
+        colWidths=[width / 5] * 5)
+    strip.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), soft), ("BOX", (0, 0), (-1, -1), 0.5, line),
+        ("LINEBEFORE", (1, 0), (-1, -1), 0.5, line), ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, 0), 8), ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+    ]))
+    story += [strip]
+
+    story.append(Paragraph("Executive summary", s_h1))
+    story += [Paragraph(escape(_clean(p)), s_body) for p in executive_summary(r)]
+
+    findings = r.findings
+    if findings:
+        story.append(Paragraph("Findings at a glance", s_h1))
+        rows = [[Paragraph("<b>#</b>", s_cell), Paragraph("<b>Severity</b>", s_cell),
+                 Paragraph("<b>Finding</b>", s_cell), Paragraph("<b>Area</b>", s_cell),
+                 Paragraph("<b>Fix by</b>", s_cell)]]
+        for i, f in enumerate(findings, 1):
+            rows.append([Paragraph(str(i), s_cell), Paragraph(sev_tag(f.severity), s_cell),
+                         Paragraph(escape(_clean(f.title)), s_cell), Paragraph(escape(f.check), s_cell),
+                         Paragraph(TIMELINE[f.severity], s_cell)])
+        t = Table(rows, colWidths=[0.35 * inch, 0.95 * inch, width - 4.0 * inch, 1.5 * inch, 1.2 * inch], repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), soft), ("LINEBELOW", (0, 0), (-1, -1), 0.5, line),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t)
+
+        story.append(Paragraph("Detailed findings", s_h1))
+        for i, f in enumerate(findings, 1):
+            body = [Paragraph(f"{sev_tag(f.severity)} &nbsp;<font color='#6B6B66'>· {escape(f.check)} · fix "
+                              f"{TIMELINE[f.severity].lower()}</font>", s_cell),
+                    Spacer(1, 2),
+                    Paragraph(f"{i}. {escape(_clean(f.title))}", s_h2),
+                    Paragraph("WHAT WE FOUND", s_label), Paragraph(rich(f.description), s_cell)]
+            if f.evidence:
+                ev = Table([[Paragraph(escape(_evidence(f.evidence)).replace("\n", "<br/>"), s_ev)]],
+                           colWidths=[width - 0.06 * inch - 24])
+                ev.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), soft),
+                                        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+                body += [Paragraph("EVIDENCE", s_label), ev]
+            if f.recommendation:
+                body += [Paragraph("HOW TO FIX", s_label), Paragraph(rich(f.recommendation), s_cell)]
+            card = Table([["", body]], colWidths=[0.06 * inch, width - 0.06 * inch])
+            card.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#" + SEV_HEX[f.severity])),
+                ("BOX", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (1, 0), (1, 0), 12), ("RIGHTPADDING", (1, 0), (1, 0), 12),
+                ("TOPPADDING", (1, 0), (1, 0), 9), ("BOTTOMPADDING", (1, 0), (1, 0), 10),
+                ("LEFTPADDING", (0, 0), (0, 0), 0), ("RIGHTPADDING", (0, 0), (0, 0), 0),
+            ]))
+            story += [KeepTogether(card), Spacer(1, 8)]
+
+    if r.passed:
+        story.append(Paragraph("Checks passed", s_h1))
+        story += [Paragraph(f'<font color="#2F7D4F">✓</font>&nbsp; {escape(p)}', s_body) for p in r.passed]
+    if r.errors:
+        story.append(Paragraph("Scan notes", s_h1))
+        story += [Paragraph(escape(_clean(e)), s_cell) for e in r.errors]
+
+    story.append(Paragraph("Methodology and scope", s_h1))
+    meth = Table([[Paragraph(f"<b>{escape(n)}</b>", s_cell), Paragraph(escape(d), s_cell)] for n, d in METHODOLOGY],
+                 colWidths=[1.9 * inch, width - 1.9 * inch])
+    meth.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                              ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    story += [meth, Spacer(1, 8), Paragraph(escape(DISCLAIMER), s_small),
+              Spacer(1, 4), Paragraph("Severity weights: critical −40, high −20, medium −8, low −3, info 0. "
+                                      "Any critical finding caps the score at 50.", s_small)]
+
+    class NumberedCanvas(rl_canvas.Canvas):
+        """Two-pass canvas so the footer can say 'Page X of Y'."""
+
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._pages = []
+
+        def showPage(self):  # noqa: N802 (reportlab API)
+            self._pages.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._pages)
+            for state in self._pages:
+                self.__dict__.update(state)
+                self.setFont("Vera", 8)
+                self.setFillColor(muted)
+                self.setStrokeColor(line)
+                self.line(0.75 * inch, 0.6 * inch, LETTER[0] - 0.75 * inch, 0.6 * inch)
+                self.drawString(0.75 * inch, 0.42 * inch, f"Security report · {_clean(host_of(r))}")
+                self.drawRightString(LETTER[0] - 0.75 * inch, 0.42 * inch, f"Page {self._pageNumber} of {total}")
+                super().showPage()
+            super().save()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=LETTER, leftMargin=0.75 * inch, rightMargin=0.75 * inch, topMargin=0.7 * inch,
+        bottomMargin=0.85 * inch, title=f"Security report: {_clean(host_of(r))}", author="Vigil",
+        subject="Website security posture scan", creator=f"Vigil {__version__}",
+    )
+    doc.build(story, canvasmaker=NumberedCanvas)
+    return buf.getvalue()
+
+
+# --- Word (.docx) --------------------------------------------------------------
+
+def render_docx(r: ScanResult) -> bytes:
+    from docx import Document
+    from docx.enum.section import WD_ORIENT
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt, RGBColor
+
+    def rgb(h: str) -> RGBColor:
+        return RGBColor.from_string(h)
+
+    def shade(cell, hex_color: str) -> None:
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), hex_color)
+        tc_pr.append(shd)
+
+    def borders(table, color="DDDDD7", inside=True) -> None:
+        tbl_pr = table._tbl.tblPr
+        b = OxmlElement("w:tblBorders")
+        edges = ("top", "left", "bottom", "right") + (("insideH", "insideV") if inside else ())
+        for edge in edges:
+            e = OxmlElement(f"w:{edge}")
+            e.set(qn("w:val"), "single")
+            e.set(qn("w:sz"), "4")
+            e.set(qn("w:color"), color)
+            b.append(e)
+        tbl_pr.append(b)
+
+    def keep_with_next(p) -> None:
+        p.paragraph_format.keep_with_next = True
+
+    def add_rich(p, text: str, size: float = 10) -> None:
+        for chunk, code in _spans(text):
+            run = p.add_run(chunk)
+            run.font.size = Pt(size - 0.5 if code else size)
+            if code:
+                run.font.name = "Consolas"
+
+    def field(p, instr: str) -> None:
+        """Insert a Word field (PAGE / NUMPAGES) so page numbers update automatically."""
+        run = p.add_run()
+        for tag, attr in (("w:fldChar", "begin"), ("w:instrText", instr), ("w:fldChar", "end")):
+            el = OxmlElement(tag)
+            if tag == "w:fldChar":
+                el.set(qn("w:fldCharType"), attr)
+            else:
+                el.set(qn("xml:space"), "preserve")
+                el.text = attr
+            run._r.append(el)
+        run.font.size = Pt(8)
+        run.font.color.rgb = rgb("6B6B66")
+
+    doc = Document()
+    sec = doc.sections[0]
+    sec.orientation = WD_ORIENT.PORTRAIT
+    sec.page_width, sec.page_height = Inches(8.5), Inches(11)
+    for side in ("left_margin", "right_margin"):
+        setattr(sec, side, Inches(0.85))
+    sec.top_margin, sec.bottom_margin = Inches(0.8), Inches(0.8)
+
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(10.5)
+    normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
+    normal.paragraph_format.space_after = Pt(4)
+    for name, size in (("Heading 1", 15), ("Heading 2", 12)):
+        st = doc.styles[name]
+        st.font.name, st.font.size, st.font.bold = "Calibri", Pt(size), True
+        st.font.color.rgb = rgb("1C1C1A")
+        rfonts = st.element.rPr.rFonts  # theme fonts would override Calibri, so drop them
+        for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
+            rfonts.attrib.pop(qn(attr), None)
+        st.paragraph_format.space_before = Pt(14 if name == "Heading 1" else 4)
+        st.paragraph_format.space_after = Pt(4)
+
+    props = doc.core_properties
+    props.title = f"Security report: {_clean(host_of(r))}"
+    props.author = "Vigil"
+    props.subject = "Website security posture scan"
+
+    # Footer: "Security report · host        Page X of Y"
+    fp = sec.footer.paragraphs[0]
+    fp.text = ""
+    lead = fp.add_run(f"Security report · {_clean(host_of(r))}    ·    Page ")
+    lead.font.size, lead.font.color.rgb = Pt(8), rgb("6B6B66")
+    field(fp, "PAGE")
+    mid = fp.add_run(" of ")
+    mid.font.size, mid.font.color.rgb = Pt(8), rgb("6B6B66")
+    field(fp, "NUMPAGES")
+
+    # Title block with grade badge.
+    head = doc.add_table(rows=1, cols=2)
+    head.alignment = WD_TABLE_ALIGNMENT.CENTER
+    left, right = head.rows[0].cells
+    left.width, right.width = Inches(5.6), Inches(1.2)
+    p = left.paragraphs[0]
+    run = p.add_run("Website Security Report")
+    run.bold, run.font.size = True, Pt(22)
+    p = left.add_paragraph()
+    run = p.add_run(_clean(r.final_url))
+    run.bold, run.font.size = True, Pt(12)
+    p = left.add_paragraph()
+    run = p.add_run(f"Scanned {_when(r)}  ·  Vigil {__version__}")
+    run.font.size, run.font.color.rgb = Pt(9.5), rgb("6B6B66")
+    shade(right, GRADE_HEX.get(r.grade, "6B6B66"))
+    p = right.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(r.grade)
+    run.bold, run.font.size, run.font.color.rgb = True, Pt(36), rgb("FFFFFF")
+    p = right.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"{r.score} / 100")
+    run.font.size, run.font.color.rgb = Pt(9.5), rgb("FFFFFF")
+    doc.add_paragraph()
+
+    # Severity counts strip.
+    counts = r.summary()
+    strip = doc.add_table(rows=2, cols=5)
+    borders(strip)
+    for i, s in enumerate(Severity):
+        top, bottom = strip.cell(0, i), strip.cell(1, i)
+        for c in (top, bottom):
+            shade(c, "F4F4F1")
+        run = top.paragraphs[0].add_run(str(counts[s.value]))
+        run.bold, run.font.size, run.font.color.rgb = True, Pt(16), rgb(SEV_HEX[s])
+        run = bottom.paragraphs[0].add_run(s.value.capitalize())
+        run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
+
+    doc.add_heading("Executive summary", level=1)
+    for para in executive_summary(r):
+        doc.add_paragraph(_clean(para))
+
+    findings = r.findings
+    if findings:
+        doc.add_heading("Findings at a glance", level=1)
+        t = doc.add_table(rows=1, cols=5)
+        borders(t)
+        widths = (Inches(0.35), Inches(0.95), Inches(2.85), Inches(1.6), Inches(1.05))
+        for cell, label, w in zip(t.rows[0].cells, ("#", "Severity", "Finding", "Area", "Fix by"), widths,
+                                  strict=True):
+            cell.width = w
+            shade(cell, "F4F4F1")
+            run = cell.paragraphs[0].add_run(label)
+            run.bold, run.font.size = True, Pt(9)
+        # Repeat the header row on every page.
+        tr_pr = t.rows[0]._tr.get_or_add_trPr()
+        hdr = OxmlElement("w:tblHeader")
+        hdr.set(qn("w:val"), "true")
+        tr_pr.append(hdr)
+        for i, f in enumerate(findings, 1):
+            cells = t.add_row().cells
+            values = (str(i), f.severity.value.upper(), _clean(f.title), f.check, TIMELINE[f.severity])
+            for j, (cell, value, w) in enumerate(zip(cells, values, widths, strict=True)):
+                cell.width = w
+                run = cell.paragraphs[0].add_run(value)
+                run.font.size = Pt(9)
+                if j == 1:
+                    run.bold, run.font.color.rgb = True, rgb(SEV_HEX[f.severity])
+
+        doc.add_heading("Detailed findings", level=1)
+        for i, f in enumerate(findings, 1):
+            card = doc.add_table(rows=1, cols=2)
+            borders(card, inside=False)
+            bar, body = card.rows[0].cells
+            bar.width, body.width = Inches(0.08), Inches(6.72)
+            shade(bar, SEV_HEX[f.severity])
+            p = body.paragraphs[0]
+            run = p.add_run(f.severity.value.upper())
+            run.bold, run.font.size, run.font.color.rgb = True, Pt(8.5), rgb(SEV_HEX[f.severity])
+            run = p.add_run(f"   ·  {f.check}  ·  fix {TIMELINE[f.severity].lower()}")
+            run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
+            keep_with_next(p)
+            p = body.add_paragraph()
+            run = p.add_run(f"{i}. {_clean(f.title)}")
+            run.bold, run.font.size = True, Pt(12)
+            keep_with_next(p)
+
+            def label(text: str, body=body) -> None:
+                lp = body.add_paragraph()
+                lp.paragraph_format.space_before, lp.paragraph_format.space_after = Pt(4), Pt(1)
+                lr = lp.add_run(text)
+                lr.bold, lr.font.size, lr.font.color.rgb = True, Pt(8), rgb("6B6B66")
+                keep_with_next(lp)
+
+            label("WHAT WE FOUND")
+            add_rich(body.add_paragraph(), f.description)
+            if f.evidence:
+                label("EVIDENCE")
+                ep = body.add_paragraph()
+                er = ep.add_run(_evidence(f.evidence))
+                er.font.name, er.font.size = "Consolas", Pt(8.5)
+                p_pr = ep._p.get_or_add_pPr()
+                shd = OxmlElement("w:shd")
+                shd.set(qn("w:val"), "clear")
+                shd.set(qn("w:fill"), "F4F4F1")
+                p_pr.append(shd)
+            if f.recommendation:
+                label("HOW TO FIX")
+                add_rich(body.add_paragraph(), f.recommendation)
+            # Don't split a finding across pages.
+            tr_pr = card.rows[0]._tr.get_or_add_trPr()
+            cant = OxmlElement("w:cantSplit")
+            cant.set(qn("w:val"), "true")
+            tr_pr.append(cant)
+            doc.add_paragraph().paragraph_format.space_after = Pt(0)
+
+    if r.passed:
+        doc.add_heading("Checks passed", level=1)
+        for name in r.passed:
+            p = doc.add_paragraph()
+            run = p.add_run("✓  ")
+            run.bold, run.font.color.rgb = True, rgb("2F7D4F")
+            p.add_run(name)
+    if r.errors:
+        doc.add_heading("Scan notes", level=1)
+        for e in r.errors:
+            doc.add_paragraph(_clean(e))
+
+    doc.add_heading("Methodology and scope", level=1)
+    meth = doc.add_table(rows=0, cols=2)
+    borders(meth)
+    for name, desc in METHODOLOGY:
+        a, b = meth.add_row().cells
+        a.width, b.width = Inches(1.9), Inches(4.9)
+        run = a.paragraphs[0].add_run(name)
+        run.bold, run.font.size = True, Pt(9)
+        b.paragraphs[0].add_run(desc).font.size = Pt(9)
+    for text in (DISCLAIMER, "Severity weights: critical −40, high −20, medium −8, low −3, info 0. "
+                             "Any critical finding caps the score at 50."):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        run = p.add_run(text)
+        run.font.size, run.font.color.rgb = Pt(8.5), rgb("6B6B66")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

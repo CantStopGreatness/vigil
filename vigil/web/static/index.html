@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigil · Website Security Scanner</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main>
+  <h1>Vigil</h1>
+  <p class="tag">Check a website's security headers, TLS, cookies, exposed files and email-spoofing protection.</p>
+
+  <form id="f">
+    <div class="row">
+      <input id="url" type="text" placeholder="example.com" autocomplete="off" required>
+      <button id="go" type="submit">Scan</button>
+    </div>
+    <label class="auth"><input id="auth" type="checkbox"> I own this site or have permission to test it.
+      Scans are passive and non-destructive, but they do request a handful of well-known file paths.</label>
+    <div id="err" class="err" role="alert"></div>
+  </form>
+
+  <section id="result" aria-live="polite"></section>
+
+  <h2>Your recent scans</h2>
+  <p class="muted">Kept only in this browser. Report links are private: anyone you share one with can view it.</p>
+  <table><thead><tr><th>Grade</th><th>Target</th><th>When</th><th></th></tr></thead><tbody id="hist"></tbody></table>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

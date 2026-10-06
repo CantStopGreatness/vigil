@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vigil-scan"
+version = "0.1.0"
+description = "Website security posture scanner: headers, TLS, cookies, exposed files, SPF/DMARC."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Aryan Thakur" }]
+dependencies = [
+  "httpx>=0.27",
+  "certifi",
+  "dnspython>=2.6",
+  "tldextract>=5.1",
+  "jinja2>=3.1",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "reportlab>=4.0",
+  "python-docx>=1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+vigil = "vigil.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vigil*"]
+
+[tool.setuptools.package-data]
+vigil = ["templates/*.html", "web/static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
