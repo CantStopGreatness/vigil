@@ -14,17 +14,21 @@ import ipaddress
 import os
 import time
 from collections import defaultdict, deque
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__, db
-from ..export import download_name, render_docx, render_pdf
-from ..models import ScanResult
+from ..checks import CHECKS_BY_KEY
+from ..export import SECTIONS, ReportOptions, download_name, render_docx, render_pdf, tailor
+from ..models import ScanResult, Severity
 from ..report import render_html
 from ..scanner import scan
 from ..target import InvalidTargetError, UnsafeTargetError
@@ -97,6 +101,7 @@ def _rate_limited(client: str) -> bool:
 class ScanRequest(BaseModel):
     url: str = Field(..., max_length=2048)
     authorized: bool = False
+    checks: list[str] | None = Field(None, max_length=len(CHECKS_BY_KEY))  # None = run every check
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
@@ -108,13 +113,17 @@ def index() -> FileResponse:
 async def create_scan(body: ScanRequest, request: Request) -> dict:
     if not body.authorized:
         raise HTTPException(400, "Confirm that you own or are authorized to test this site.")
+    unknown = [k for k in body.checks or [] if k not in CHECKS_BY_KEY]
+    if unknown or body.checks == []:
+        raise HTTPException(400, f"Choose checks from: {', '.join(CHECKS_BY_KEY)}.")
+    checks = [CHECKS_BY_KEY[k] for k in body.checks] if body.checks else None
     if _rate_limited(_client_key(request)):
         raise HTTPException(429, "Too many scans. Try again in a minute.")
     if _scan_slots.locked():
         raise HTTPException(503, "The scanner is busy. Try again in a few seconds.")
     async with _scan_slots:
         try:
-            result = await asyncio.wait_for(scan(body.url, allow_private=ALLOW_PRIVATE), SCAN_TIMEOUT)
+            result = await asyncio.wait_for(scan(body.url, checks=checks, allow_private=ALLOW_PRIVATE), SCAN_TIMEOUT)
         except (InvalidTargetError, UnsafeTargetError) as e:
             raise HTTPException(400, str(e)) from e
         except ConnectionError as e:
@@ -134,12 +143,30 @@ def get_scan(token: str) -> dict:
     return data
 
 
+def report_options(sections: str = Query(",".join(SECTIONS)), min: str = "info",  # noqa: A002
+                   evidence: bool = True) -> ReportOptions:
+    """Parse ?sections=summary,details&min=medium&evidence=0 from a report link."""
+    chosen = frozenset(filter(None, sections.split(","))) - {"overview"}  # merged into "details"; old links still work
+    if not chosen <= set(SECTIONS) or min not in Severity.__members__.values():
+        raise HTTPException(400, f"sections must be from {', '.join(SECTIONS)}; min must be a severity.")
+    return ReportOptions(sections=chosen, min_severity=Severity(min), evidence=evidence)
+
+
+Options = Annotated[ReportOptions, Depends(report_options)]
+
+
 @app.get("/scans/{token}/report", response_class=HTMLResponse)
-def html_report(token: str) -> HTMLResponse:
+def html_report(token: str, opts: Options) -> HTMLResponse:
     data = db.get(token)
     if data is None:
         raise HTTPException(404, "Scan not found")
-    return HTMLResponse(render_html(ScanResult.from_dict(data), token=token),
+    result = tailor(ScanResult.from_dict(data), opts)
+    if "passed" not in opts.sections:
+        result = replace(result, passed=[])
+    # Rebuilt from the parsed options rather than echoed, so only known values reach the page.
+    query = "?" + urlencode({"sections": ",".join(s for s in SECTIONS if s in opts.sections),
+                             "min": opts.min_severity.value, "evidence": int(opts.evidence)})
+    return HTMLResponse(render_html(result, token=token, query=query),
                         headers={"Content-Security-Policy": REPORT_CSP, "X-Robots-Tag": "noindex"})
 
 
@@ -150,7 +177,7 @@ DOWNLOADS = {
 
 
 @app.get("/scans/{token}/report.{fmt}")
-def download_report(token: str, fmt: str) -> Response:
+def download_report(token: str, fmt: str, opts: Options, preview: bool = False) -> Response:
     if fmt not in DOWNLOADS:
         raise HTTPException(404, "Unknown format")
     data = db.get(token)
@@ -158,11 +185,17 @@ def download_report(token: str, fmt: str) -> Response:
         raise HTTPException(404, "Scan not found")
     media_type, render = DOWNLOADS[fmt]
     result = ScanResult.from_dict(data)
-    return Response(render(result), media_type=media_type, headers={
+    headers = {
         "Content-Disposition": f'attachment; filename="{download_name(result, fmt)}"',
         "X-Robots-Tag": "noindex",
         "Cache-Control": "private, max-age=3600",
-    })
+    }
+    if preview and fmt == "pdf":
+        # Shown inside the dashboard's preview dialog: inline, and frameable by our own pages only.
+        # No other CSP directives here: browsers' built-in PDF viewers break under object-src/sandbox.
+        headers |= {"Content-Disposition": f'inline; filename="{download_name(result, fmt)}"',
+                    "Content-Security-Policy": "frame-ancestors 'self'", "X-Frame-Options": "SAMEORIGIN"}
+    return Response(render(result, opts), media_type=media_type, headers=headers)
 
 
 @app.get("/.well-known/security.txt", include_in_schema=False)

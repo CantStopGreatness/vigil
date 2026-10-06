@@ -13,9 +13,9 @@ def client(tmp_path, monkeypatch):
 
     real_scan = webapp.scan
 
-    async def offline_scan(url, **kwargs):
+    async def offline_scan(url, checks=None, **kwargs):
         t = httpx.MockTransport(lambda req: httpx.Response(200, content=b"<html></html>"))
-        return await real_scan(url, checks=[headers], transport=t, **kwargs)
+        return await real_scan(url, checks=checks or [headers], transport=t, **kwargs)
 
     monkeypatch.setattr(webapp, "scan", offline_scan)
     return TestClient(webapp.app)
@@ -135,3 +135,33 @@ def test_report_downloads(client):
     assert client.get("/scans/nope/report.pdf").status_code == 404
     page = client.get(f"/scans/{token}/report").text
     assert f"/scans/{token}/report.pdf" in page and f"/scans/{token}/report.docx" in page
+
+
+def test_scan_runs_only_chosen_checks(client):
+    r = client.post("/api/scans", json={"url": "example.com", "authorized": True, "checks": ["cookies"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["passed"]) | {f["check"] for f in body["findings"]} == {"Cookies"}
+    for bad in (["nope"], []):
+        r = client.post("/api/scans", json={"url": "example.com", "authorized": True, "checks": bad})
+        assert r.status_code == 400
+
+
+def test_report_options(client):
+    token = client.post("/api/scans", json={"url": "example.com", "authorized": True}).json()["id"]
+    pdf = client.get(f"/scans/{token}/report.pdf?sections=summary,details&min=high&evidence=0")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    page = client.get(f"/scans/{token}/report?min=critical&sections=details&x=%22%3E").text
+    assert "No issues found." in page  # the headers check finds nothing critical
+    assert "report.pdf?sections=details&amp;min=critical&amp;evidence=1" in page and "&quot;&gt;" not in page
+    assert client.get(f"/scans/{token}/report.pdf?sections=bogus").status_code == 400
+    assert client.get(f"/scans/{token}/report.pdf?min=extreme").status_code == 400
+
+
+def test_pdf_preview_is_inline_and_same_origin_frameable(client):
+    token = client.post("/api/scans", json={"url": "example.com", "authorized": True}).json()["id"]
+    h = client.get(f"/scans/{token}/report.pdf?preview=1&min=high").headers
+    assert h["content-disposition"].startswith("inline;")
+    assert h["content-security-policy"] == "frame-ancestors 'self'" and h["x-frame-options"] == "SAMEORIGIN"
+    h = client.get(f"/scans/{token}/report.pdf").headers  # plain downloads stay unframeable attachments
+    assert h["content-disposition"].startswith("attachment;") and h["x-frame-options"] == "DENY"
