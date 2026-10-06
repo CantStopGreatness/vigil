@@ -8,8 +8,8 @@ venv/
 *.db
 *.db-shm
 *.db-wal
-*-report.html
-report.html
-report.json
+/*-report.html
+/report.html
+/report.json
 .DS_Store
 .env
