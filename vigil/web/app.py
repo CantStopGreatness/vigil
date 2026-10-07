@@ -42,9 +42,8 @@ ALLOW_PRIVATE = os.environ.get("VIGIL_ALLOW_PRIVATE") == "1"
 # e.g. "mailto:security@example.com"; published at /.well-known/security.txt (RFC 9116) when set.
 SECURITY_CONTACT = os.environ.get("VIGIL_SECURITY_CONTACT")
 
-APP_CSP = ("default-src 'self'; script-src 'self' https://cdn.vercel-insights.com 'unsafe-inline'; "
-           "style-src 'self'; img-src 'self' data:; "
-           "connect-src 'self' https://vitals.vercel-insights.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+APP_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+           "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
 # Reports are self-contained HTML with one inline <style> and no scripts at all.
 REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
 
