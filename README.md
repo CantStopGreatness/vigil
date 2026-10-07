@@ -141,6 +141,11 @@ Only scan websites you own or have explicit permission to test. Vigil is passive
 
 <!-- Write 3–5 bullets in your own words after you've worked on it: tradeoffs, bugs you hit, what you'd do differently. Recruiters read this section. -->
 
+- **A security scanner is itself an attack surface.** I started out thinking about the sites being scanned, but the bigger risk was the scanner. Checking that a URL is public isn't enough: a redirect or a DNS rebind can point it at internal addresses after the check. Resolving each host once and connecting to exactly that IP was the only reliable fix.
+- **Untrusted input shows up in places you don't expect.** Escaping scanned-site text in the HTML report was obvious. Less obvious: the PDF library has its own markup language (including tags that read local files), so the same text needed escaping there too. Every output format is a new place for the same input to cause trouble.
+- **Reports are for the reader.** My first version created a PDF with five pages for one site. The reports I did by hand taught me that clients want one or two pages, similar to a resume. You don't want a long list of all the vulnerabilities and minor details, but a summarized list of the major problems, and possible solutions.
+- **Serverless changes your assumptions.** SQLite and an in-memory rate limiter worked on a single server. On Vercel, with no persistent disk and many short-lived instances, scans disappeared between requests. I moved storage to Redis with automatic expiry. Next time I'd design the storage layer from the start, and move the rate limiter to Redis, so the limit holds across instances.
+
 ## License
 
 MIT
