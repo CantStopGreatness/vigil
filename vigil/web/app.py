@@ -74,6 +74,8 @@ async def security_headers(request: Request, call_next):
 def _client_key(request: Request) -> str:
     """Rate-limit key. IPv6 users usually control a whole /64, so bucket by that."""
     host = request.client.host if request.client else "unknown"
+    if os.environ.get("VERCEL"):  # Vercel sets x-real-ip to the visitor's address and strips client copies
+        host = request.headers.get("x-real-ip", host)
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:

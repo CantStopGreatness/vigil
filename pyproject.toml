@@ -34,6 +34,9 @@ include = ["vigil*"]
 [tool.setuptools.package-data]
 vigil = ["templates/*.html", "web/static/*"]
 
+[tool.vercel]
+entrypoint = "vigil.web.app:app"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
