@@ -165,3 +165,22 @@ def test_pdf_preview_is_inline_and_same_origin_frameable(client):
     assert h["content-security-policy"] == "frame-ancestors 'self'" and h["x-frame-options"] == "SAMEORIGIN"
     h = client.get(f"/scans/{token}/report.pdf").headers  # plain downloads stay unframeable attachments
     assert h["content-disposition"].startswith("attachment;") and h["x-frame-options"] == "DENY"
+
+
+def test_scans_are_stored_in_redis_when_configured(client, monkeypatch):
+    store = {}
+
+    def fake_cmd(op, key, *rest):
+        if op == "SET":
+            assert rest[1] == "EX"  # scans expire on their own
+            store[key] = rest[0]
+            return "OK"
+        return store.get(key)
+
+    monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
+    monkeypatch.setenv("KV_REST_API_TOKEN", "t")
+    monkeypatch.setattr(webapp.db, "_redis_cmd", fake_cmd)
+    token = client.post("/api/scans", json={"url": "example.com", "authorized": True}).json()["id"]
+    assert f"vigil:scan:{token}" in store
+    assert client.get(f"/api/scans/{token}").json()["id"] == token
+    assert client.get("/api/scans/missing").status_code == 404

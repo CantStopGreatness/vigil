@@ -14,3 +14,5 @@ venv/
 .DS_Store
 .env
 graphify-out/
+.vercel
+.env*

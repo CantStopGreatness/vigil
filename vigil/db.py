@@ -1,4 +1,5 @@
-"""Scan history in SQLite (swap for Postgres when you need multiple workers).
+"""Scan history: SQLite locally, Upstash Redis when its credentials are set (e.g. on Vercel,
+which has no persistent disk and runs many instances).
 
 Reports are addressed by a random token, not the row id, so on a public
 deployment nobody can enumerate other people's scans by counting upwards.
@@ -12,6 +13,8 @@ import secrets
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+
+import httpx
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
@@ -34,6 +37,20 @@ def _retention_days() -> int:
     return int(os.environ.get("VIGIL_RETENTION_DAYS", "30"))
 
 
+def _redis() -> tuple[str, str] | None:
+    """Upstash REST credentials, under either the Vercel KV or the Upstash variable names."""
+    url = os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
+    token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+    return (url, token) if url and token else None
+
+
+def _redis_cmd(*args: str | int):
+    url, token = _redis()
+    r = httpx.post(url, json=[str(a) for a in args], headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    r.raise_for_status()
+    return r.json()["result"]
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_path(), timeout=10)
     conn.row_factory = sqlite3.Row
@@ -50,6 +67,9 @@ def connect() -> sqlite3.Connection:
 def save(result: dict) -> str:
     """Store a scan, prune expired ones, and return the report token."""
     token = secrets.token_urlsafe(16)
+    if _redis():  # Redis expires the key itself, so there's nothing to prune
+        _redis_cmd("SET", f"vigil:scan:{token}", json.dumps(result), "EX", _retention_days() * 86400)
+        return token
     cutoff = (datetime.now(UTC) - timedelta(days=_retention_days())).isoformat(timespec="seconds")
     with closing(connect()) as conn, conn:
         conn.execute(
@@ -62,6 +82,9 @@ def save(result: dict) -> str:
 
 
 def get(token: str) -> dict | None:
+    if _redis():
+        raw = _redis_cmd("GET", f"vigil:scan:{token}")
+        return None if raw is None else {"id": token, **json.loads(raw)}
     with closing(connect()) as conn:
         row = conn.execute("SELECT token, result_json FROM scans WHERE token = ?", (token,)).fetchone()
     if row is None:

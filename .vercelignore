@@ -1,0 +1,12 @@
+.venv
+.git
+.agents
+.claude
+.impeccable
+skills-lock.json
+tests
+demo
+graphify-out
+*.db
+.env*
+__pycache__
