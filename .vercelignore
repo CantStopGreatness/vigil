@@ -10,3 +10,4 @@ graphify-out
 *.db
 .env*
 __pycache__
+docs

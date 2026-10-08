@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlencode
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -86,7 +87,26 @@ def _client_key(request: Request) -> str:
 
 
 def _rate_limited(client: str) -> bool:
-    """Sliding-window limiter. In-memory, so it's per-process; use Redis in production."""
+    """Shared across instances via Redis when it's configured (e.g. on Vercel), else in-memory."""
+    if db._redis():
+        try:
+            return _rate_limited_redis(client)
+        except httpx.HTTPError:
+            pass  # Redis unreachable: fall back to this instance's own limiter rather than block everyone
+    return _rate_limited_local(client)
+
+
+def _rate_limited_redis(client: str) -> bool:
+    # ponytail: fixed one-minute window, so a burst straddling a minute boundary can reach 2x the limit.
+    key = f"vigil:rl:{client}:{int(time.time() // 60)}"
+    n = db._redis_cmd("INCR", key)
+    if n == 1:
+        db._redis_cmd("EXPIRE", key, 120)
+    return n > RATE_LIMIT
+
+
+def _rate_limited_local(client: str) -> bool:
+    """Sliding-window limiter. In-memory, so it's per-process."""
     now = time.monotonic()
     q = _hits[client]
     while q and now - q[0] > 60:
@@ -119,7 +139,7 @@ async def create_scan(body: ScanRequest, request: Request) -> dict:
     if unknown or body.checks == []:
         raise HTTPException(400, f"Choose checks from: {', '.join(CHECKS_BY_KEY)}.")
     checks = [CHECKS_BY_KEY[k] for k in body.checks] if body.checks else None
-    if _rate_limited(_client_key(request)):
+    if await asyncio.to_thread(_rate_limited, _client_key(request)):
         raise HTTPException(429, "Too many scans. Try again in a minute.")
     if _scan_slots.locked():
         raise HTTPException(503, "The scanner is busy. Try again in a few seconds.")
