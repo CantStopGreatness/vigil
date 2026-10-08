@@ -213,3 +213,12 @@ def test_rate_limit_is_shared_through_redis_and_falls_back_when_it_is_down(clien
 
     monkeypatch.setattr(webapp.db, "_redis_cmd", down)
     assert [webapp._rate_limited("5.6.7.8") for _ in range(3)] == [False, False, True]
+
+
+def test_link_preview_uses_this_deployments_origin(client):
+    page = client.get("/").text
+    assert '<meta property="og:image" content="http://testserver/static/og.png">' in page
+    assert "__ORIGIN__" not in page
+    hostile = client.get("/", headers={"host": 'evil.com"><script>x</script>'}).text
+    assert "<script>x</script>" not in hostile
+    assert client.get("/static/favicon.svg").status_code == 200

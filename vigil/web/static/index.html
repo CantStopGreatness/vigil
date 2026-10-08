@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Vigil · Website Security Scanner</title>
+<meta name="description" content="Grade any website's security in seconds: headers, TLS, cookies, exposed files, known CVEs and email spoofing, with a plain-English fix and a ready-to-share PDF report.">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Vigil · Website security, graded in seconds">
+<meta property="og:description" content="Headers, TLS, cookies, exposed files, known CVEs and email spoofing, with a plain-English fix for every finding.">
+<meta property="og:url" content="__ORIGIN__/">
+<meta property="og:image" content="__ORIGIN__/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="/static/app.css">
 <!-- Vercel Web Analytics and Speed Insights, served from our own origin so the strict CSP stays as is -->
 <script defer src="/_vercel/insights/script.js"></script>
@@ -76,12 +86,15 @@
     <form id="f">
       <div class="row">
         <textarea id="urls" rows="1" placeholder="example.com" autocomplete="off" spellcheck="false"
-                  aria-label="Websites to scan, one per line" aria-describedby="urls-hint"></textarea>
+                  aria-label="Websites to scan, one per line" aria-describedby="urls-help"></textarea>
         <button id="go" type="submit">Scan</button>
       </div>
-      <div class="hint" id="urls-hint">
-        <span>Scanning several sites? Paste up to 10, one per line (Shift+Enter for a new line).</span>
-        <label class="file-btn"><input id="file" type="file" accept=".txt,.csv,text/plain,text/csv">Import list</label>
+      <div class="hint">
+        <span id="urls-help">Scanning several sites? Paste up to 10, one per line (Shift+Enter for a new line).</span>
+        <span class="hint-actions">
+          <button class="file-btn" id="try-self" type="button">Try it on this site</button>
+          <label class="file-btn"><input id="file" type="file" accept=".txt,.csv,text/plain,text/csv">Import list</label>
+        </span>
       </div>
 
       <details id="opts" class="opts">

@@ -10,6 +10,7 @@ worker process: the rate limiter and concurrency cap live in memory.
 from __future__ import annotations
 
 import asyncio
+import html
 import ipaddress
 import os
 import time
@@ -22,7 +23,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -127,8 +128,10 @@ class ScanRequest(BaseModel):
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+def index(request: Request) -> HTMLResponse:
+    # Link previews need absolute URLs, so fill in this deployment's own origin (escaped: Host is client-sent).
+    origin = html.escape(str(request.base_url).rstrip("/"))
+    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__ORIGIN__", origin))
 
 
 @app.post("/api/scans")

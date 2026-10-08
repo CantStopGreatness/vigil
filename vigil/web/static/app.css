@@ -60,6 +60,8 @@ textarea:focus, select:focus { border-color:var(--accent); box-shadow:0 0 0 4px 
         font-size:13px; color:var(--muted) }
 .file-btn { position:relative; display:inline-flex; align-items:center; min-height:36px; padding:6px 14px; border:1px solid var(--line);
             border-radius:8px; color:var(--ink); cursor:pointer; transition:background-color .2s var(--ease), border-color .2s var(--ease) }
+.hint-actions { display:flex; flex-wrap:wrap; gap:8px }
+button.file-btn { font:inherit; background:transparent }
 .file-btn:hover { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.25) }
 .file-btn:focus-within { outline:3px solid var(--ink); outline-offset:2px }
 .file-btn input { position:absolute; inset:0; opacity:0; cursor:pointer }

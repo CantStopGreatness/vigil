@@ -175,6 +175,13 @@ $("#file").addEventListener("change", async (ev) => {
   ev.target.value = "";
 });
 
+// Scanning Vigil itself needs no permission from the visitor: it's our own site.
+$("#try-self").addEventListener("click", () => {
+  $("#urls").value = location.origin;
+  $("#auth").checked = true;
+  $("#f").requestSubmit();
+});
+
 $("#f").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const err = $("#err"); err.textContent = "";
