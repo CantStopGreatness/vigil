@@ -1,12 +1,14 @@
 # Vigil
 
-**Website security posture scanner.** Point it at a domain and in a few seconds you get a graded report covering security headers, TLS, cookies, exposed secrets, and email-spoofing protection, with a plain-English fix for every finding.
+**Website security posture scanner.** Point it at a domain and in a few seconds you get a graded report covering security headers, TLS, cookies, exposed secrets, known CVEs in the software it runs, and email-spoofing protection, with a plain-English fix for every finding.
 
 ![CI](https://github.com/CantStopGreatness/vigil/actions/workflows/ci.yml/badge.svg)
 
 > **Why I built this:** As a cybersecurity analyst at CyberWolfe, I audited 50+ small-business websites by hand and wrote a report for each. Most findings were the same dozen misconfigurations. Vigil automates that audit and produces the report in seconds.
 
-<!-- TODO: add a screenshot or GIF of the dashboard here: docs/screenshot.png -->
+**Try it live: [vigil-psi-liard.vercel.app](https://vigil-psi-liard.vercel.app)**
+
+![Vigil scanning two sites, then previewing the PDF report](docs/demo.gif)
 
 ## What it checks
 
@@ -17,6 +19,7 @@
 | **Security headers** | Missing HSTS, CSP, clickjacking protection, `nosniff`, Referrer-Policy; CSP with `'unsafe-inline'` |
 | **Cookies** | Cookies without `Secure`, session cookies without `HttpOnly`, missing `SameSite` |
 | **Information disclosure** | `Server: nginx/1.18.0`, `X-Powered-By: PHP/7.4`, CMS version in `<meta generator>` |
+| **Known vulnerabilities** | Disclosed versions of nginx, Apache, PHP, OpenSSL, lighttpd, WordPress and Drupal matched against the NVD: "Apache httpd 2.4.29 has 117 known vulnerabilities (23 critical)" |
 | **Exposed files** | Public `.git/`, `.env`, `.htpasswd`, SQL dumps, backup archives, `phpinfo()`, phpMyAdmin; missing `security.txt` |
 | **Email spoofing** | Missing/weak SPF (`+all`, multiple records), missing DMARC or `p=none`; looked up on the organizational domain via the Public Suffix List |
 
@@ -115,7 +118,14 @@ docker run -d -p 8000:8000 -v vigil-data:/data \
 | `VIGIL_DB` | `/data/vigil.db` | SQLite path |
 | `VIGIL_ALLOW_PRIVATE` | unset | `1` allows scanning private IPs. **Local development only**: it disables SSRF protection. |
 
-Run a single worker (the image does): the rate limiter and concurrency cap are in memory. To scale out, move them to Redis and the database to Postgres (see Roadmap).
+| `NVD_API_KEY` | unset | Optional [NVD API key](https://nvd.nist.gov/developers/request-an-api-key) for the CVE check: raises NVD's limit from 5 to 50 lookups per 30 seconds |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | unset | Upstash Redis REST credentials. When set, reports and the rate limit live in Redis instead of SQLite and memory (`UPSTASH_REDIS_REST_*` names also work) |
+
+Without Redis, run a single worker (the image does): the rate limiter and concurrency cap are in memory.
+
+### On Vercel
+
+Vigil also runs as a Vercel Python function (`[tool.vercel]` in `pyproject.toml` points at the FastAPI app). Vercel has no persistent disk and runs many instances, so add Upstash Redis from the Vercel Marketplace: it sets the `KV_REST_API_*` variables, and reports and the rate limit are then shared across every instance. The concurrent-scan cap stays per instance.
 
 ## Testing
 
@@ -132,9 +142,8 @@ Only scan websites you own or have explicit permission to test. Vigil is passive
 
 ## Roadmap
 
-- [ ] CVE matching: map detected versions (`nginx/1.18.0`) to known CVEs via the NVD API
-- [ ] Postgres + Redis (shared rate limits) + background job queue so the web app can run multiple workers
-- [ ] Batch scanning from a CSV of domains, with a comparison dashboard
+- [ ] Background job queue, so batch scans keep running after the browser tab closes
+- [ ] Comparison dashboard for batch scans
 - [ ] Scheduled re-scans and alerts when a grade drops (e.g. cert about to expire)
 
 ## What I learned
