@@ -175,6 +175,8 @@ def test_scans_are_stored_in_redis_when_configured(client, monkeypatch):
             assert rest[1] == "EX"  # scans expire on their own
             store[key] = rest[0]
             return "OK"
+        if op in ("INCR", "EXPIRE"):  # the shared rate limiter
+            return 1
         return store.get(key)
 
     monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
@@ -184,3 +186,30 @@ def test_scans_are_stored_in_redis_when_configured(client, monkeypatch):
     assert f"vigil:scan:{token}" in store
     assert client.get(f"/api/scans/{token}").json()["id"] == token
     assert client.get("/api/scans/missing").status_code == 404
+
+
+def test_rate_limit_is_shared_through_redis_and_falls_back_when_it_is_down(client, monkeypatch):
+    counters, expiries = {}, {}
+
+    def fake_cmd(op, key, *rest):
+        if op == "INCR":
+            counters[key] = counters.get(key, 0) + 1
+            return counters[key]
+        if op == "EXPIRE":
+            expiries[key] = rest[0]
+            return 1
+        return None  # GET/SET for scan storage aren't needed here
+
+    monkeypatch.setenv("KV_REST_API_URL", "https://example.upstash.io")
+    monkeypatch.setenv("KV_REST_API_TOKEN", "t")
+    monkeypatch.setattr(webapp, "RATE_LIMIT", 2)
+    monkeypatch.setattr(webapp.db, "_redis_cmd", fake_cmd)
+    assert [webapp._rate_limited("1.2.3.4") for _ in range(3)] == [False, False, True]
+    assert webapp._hits == {}  # nothing counted in memory: another instance would see the same Redis count
+    assert list(expiries.values()) == [120]
+
+    def down(*a):
+        raise httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(webapp.db, "_redis_cmd", down)
+    assert [webapp._rate_limited("5.6.7.8") for _ in range(3)] == [False, False, True]
