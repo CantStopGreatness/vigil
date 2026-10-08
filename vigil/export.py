@@ -45,6 +45,8 @@ METHODOLOGY = [
                          "Referrer-Policy, Permissions-Policy."),
     ("Cookies", "Secure, HttpOnly and SameSite attributes on cookies set by the site."),
     ("Information disclosure", "Software version numbers revealed in response headers or page markup."),
+    ("Known vulnerabilities (CVEs)", "Disclosed software versions matched against the National Vulnerability "
+                                     "Database. Distributions may have backported fixes, so treat as likely."),
     ("Exposed files", "Well-known sensitive files and admin pages (.git, .env, backups, phpinfo, phpMyAdmin), "
                       "confirmed by content rather than status code alone."),
     ("Email spoofing (SPF/DMARC)", "DNS records that stop others from sending email as the domain."),
@@ -151,7 +153,7 @@ def executive_summary(r: ScanResult) -> list[str]:
     paras.append(line)
     urgent = [f.title for f in r.findings if f.severity in (Severity.CRITICAL, Severity.HIGH)]
     if urgent:
-        paras.append("Fix first: " + "; ".join(urgent[:5]) + ("; and others listed below." if len(urgent) > 5 else "."))
+        paras.append("Fix first: " + "; ".join(urgent[:3]) + ("; and others listed below." if len(urgent) > 3 else "."))
     if r.passed:
         paras.append("No issues were found in: " + ", ".join(r.passed) + ".")
     return paras
@@ -272,10 +274,10 @@ def render_pdf(r: ScanResult, opts: ReportOptions = FULL_REPORT) -> bytes:
             t.setStyle(TableStyle([
                 ("SPAN", (0, 0), (-1, 0)), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#" + SEV_HEX[sev])),
                 ("LINEBELOW", (0, 1), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ]))
-            story += [t, Spacer(1, 6)]
+            story += [t, Spacer(1, 4)]
 
     if r.passed and "passed" in on:
         story.append(Paragraph("Checks passed", s_h1))
@@ -287,12 +289,9 @@ def render_pdf(r: ScanResult, opts: ReportOptions = FULL_REPORT) -> bytes:
 
     if "methodology" in on:
         story.append(Paragraph("Methodology and scope", s_h1))
-        meth = Table([[Paragraph(f"<b>{escape(n)}</b>", s_small), Paragraph(escape(d), s_small)]
-                      for n, d in METHODOLOGY], colWidths=[1.6 * inch, width - 1.6 * inch])
-        meth.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.5, line), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                                  ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                                  ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-        story += [meth, Spacer(1, 6), Paragraph(escape(DISCLAIMER) + " " + escape(WEIGHTS), s_small)]
+        checks = " &nbsp;·&nbsp; ".join(f"<b>{escape(n)}:</b> {escape(d)}" for n, d in METHODOLOGY)
+        story += [Paragraph(checks, s_small),
+                  Spacer(1, 4), Paragraph(escape(DISCLAIMER) + " " + escape(WEIGHTS), s_small)]
 
     class NumberedCanvas(rl_canvas.Canvas):
         """Two-pass canvas so the footer can say 'Page X of Y'."""
@@ -514,14 +513,12 @@ def render_docx(r: ScanResult, opts: ReportOptions = FULL_REPORT) -> bytes:
 
     if "methodology" in on:
         doc.add_heading("Methodology and scope", level=1)
-        meth = doc.add_table(rows=0, cols=2)
-        borders(meth)
-        for name, desc in METHODOLOGY:
-            a, b = meth.add_row().cells
-            a.width, b.width = Inches(1.7), Inches(5.6)
-            run = a.paragraphs[0].add_run(name)
+        p = doc.add_paragraph()
+        for i, (name, desc) in enumerate(METHODOLOGY):
+            run = p.add_run(("  ·  " if i else "") + f"{name}: ")
             run.bold, run.font.size = True, Pt(8)
-            b.paragraphs[0].add_run(desc).font.size = Pt(8)
+            run = p.add_run(desc)
+            run.font.size, run.font.color.rgb = Pt(8), rgb("6B6B66")
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(4)
         run = p.add_run(f"{DISCLAIMER} {WEIGHTS}")
