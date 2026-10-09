@@ -222,3 +222,19 @@ def test_link_preview_uses_this_deployments_origin(client):
     hostile = client.get("/", headers={"host": 'evil.com"><script>x</script>'}).text
     assert "<script>x</script>" not in hostile
     assert client.get("/static/favicon.svg").status_code == 200
+
+
+def test_passive_scan_needs_no_authorization_and_never_probes(client, monkeypatch):
+    seen = {}
+
+    async def fake_scan(url, checks=None, **kwargs):
+        seen["checks"] = checks
+        raise ConnectionError("stop here")
+
+    monkeypatch.setattr(webapp, "scan", fake_scan)
+    assert client.post("/api/scans", json={"url": "example.com", "passive": True}).status_code == 502
+    assert "exposure" not in {c.__name__.rsplit(".", 1)[-1] for c in seen["checks"]}
+    assert len(seen["checks"]) == len(webapp.CHECKS_BY_KEY) - 1
+    r = client.post("/api/scans", json={"url": "example.com", "passive": True, "checks": ["exposure"]})
+    assert r.status_code == 400
+    assert client.post("/api/scans", json={"url": "example.com"}).status_code == 400  # full scans still need it
