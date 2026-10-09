@@ -58,6 +58,16 @@ python demo/vulnerable_site.py &
 vigil http://127.0.0.1:8080 --allow-private --html demo-report.html
 ```
 
+## Browser extension
+
+`extension/` is a Chrome extension (Manifest V3): click the eye icon and it grades the site you're on, with the same findings, fixes and PDF report as the dashboard.
+
+It runs a **passive scan**: it only reads what any visitor's browser already sees (headers, cookies, TLS, version banners and their CVEs, SPF/DMARC) and skips the exposed-file probes. Reading public responses isn't testing a site, so it works on any page without the "I'm authorized" confirmation; probing for `/.env` or `/.git` still needs that, so "Run a full audit" opens the dashboard instead. The API enforces this too: `{"passive": true}` drops the probing check and rejects requests that ask for it.
+
+It asks for the minimum permissions: `activeTab` (the current tab's URL, only when you click) and access to Vigil's own API. It never scans in the background.
+
+To try it: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `extension/` folder. To point it at another deployment, change `API` in `extension/popup.js` and `host_permissions` in `manifest.json`.
+
 ## Architecture
 
 ```
@@ -138,7 +148,7 @@ The suite runs fully offline. HTTP is faked with `httpx.MockTransport` and DNS w
 
 ## Responsible use
 
-Only scan websites you own or have explicit permission to test. Vigil is passive: it makes a few normal `GET` requests and one TLS handshake per protocol version, sends no attack payloads, and identifies itself in its User-Agent. It is a posture check, not a penetration test.
+Only run full scans on websites you own or have explicit permission to test; passive scans (the browser extension) only read what the site already serves to every visitor. Even a full scan is gentle: it makes a few normal `GET` requests and one TLS handshake per protocol version, sends no attack payloads, and identifies itself in its User-Agent. It is a posture check, not a penetration test.
 
 ## Roadmap
 

@@ -11,3 +11,4 @@ graphify-out
 .env*
 __pycache__
 docs
+extension

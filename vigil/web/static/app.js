@@ -205,5 +205,9 @@ $("#f").addEventListener("submit", async (ev) => {
   } finally { btn.disabled = false; btn.textContent = "Scan"; document.body.classList.remove("scanning"); }
 });
 
+// Links like /?url=example.com (from the browser extension's "full audit") arrive pre-filled.
+const prefill = new URLSearchParams(location.search).get("url");
+if (prefill) $("#urls").value = prefill;
+
 restoreOpts();
 loadHistory();

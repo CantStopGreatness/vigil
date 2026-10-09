@@ -125,6 +125,12 @@ class ScanRequest(BaseModel):
     url: str = Field(..., max_length=2048)
     authorized: bool = False
     checks: list[str] | None = Field(None, max_length=len(CHECKS_BY_KEY))  # None = run every check
+    # Only observe what any visitor's browser already sees: no probing for sensitive files.
+    # That's not testing the site, so it doesn't need the visitor to be authorized (browser extension).
+    passive: bool = False
+
+
+PROBING_CHECKS = {"exposure"}  # requests paths like /.env and /.git/HEAD
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
@@ -136,12 +142,17 @@ def index(request: Request) -> HTMLResponse:
 
 @app.post("/api/scans")
 async def create_scan(body: ScanRequest, request: Request) -> dict:
-    if not body.authorized:
+    if not body.authorized and not body.passive:
         raise HTTPException(400, "Confirm that you own or are authorized to test this site.")
     unknown = [k for k in body.checks or [] if k not in CHECKS_BY_KEY]
     if unknown or body.checks == []:
         raise HTTPException(400, f"Choose checks from: {', '.join(CHECKS_BY_KEY)}.")
-    checks = [CHECKS_BY_KEY[k] for k in body.checks] if body.checks else None
+    keys = body.checks or (list(CHECKS_BY_KEY) if body.passive else None)
+    if body.passive and PROBING_CHECKS & set(body.checks or []):
+        raise HTTPException(400, "A passive scan can't include the exposed-files check.")
+    if body.passive:
+        keys = [k for k in keys if k not in PROBING_CHECKS]
+    checks = [CHECKS_BY_KEY[k] for k in keys] if keys else None
     if await asyncio.to_thread(_rate_limited, _client_key(request)):
         raise HTTPException(429, "Too many scans. Try again in a minute.")
     if _scan_slots.locked():
