@@ -16,3 +16,6 @@ venv/
 graphify-out/
 .vercel
 .env*
+
+# Local settings for the Impeccable design-checker plugin
+.impeccable/
