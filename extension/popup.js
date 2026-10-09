@@ -45,10 +45,13 @@ function render(r, pageUrl) {
 
 async function main() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const pageUrl = tab?.url || "";
-  if (!/^https?:\/\//.test(pageUrl)) {
+  const tabUrl = tab?.url || "";
+  if (!/^https?:\/\//.test(tabUrl)) {
     return show(el("p", { class: "msg" }, "Vigil grades websites. Open an http:// or https:// page and click again."));
   }
+  // Only the site's origin leaves the browser: the scan never uses the path, and paths or query
+  // strings can hold private data (tokens, emails, search terms).
+  const pageUrl = new URL(tabUrl).origin;
   show(el("div", { class: "loading" }, el("div", { class: "spinner" }),
     el("p", {}, "Grading ", el("strong", {}, new URL(pageUrl).host), "…"),
     el("p", { class: "muted" }, "Usually takes a few seconds.")));
