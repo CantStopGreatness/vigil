@@ -64,7 +64,7 @@ vigil http://127.0.0.1:8080 --allow-private --html demo-report.html
 
 It runs a **passive scan**: it only reads what any visitor's browser already sees (headers, cookies, TLS, version banners and their CVEs, SPF/DMARC) and skips the exposed-file probes. Reading public responses isn't testing a site, so it works on any page without the "I'm authorized" confirmation; probing for `/.env` or `/.git` still needs that, so "Run a full audit" opens the dashboard instead. The API enforces this too: `{"passive": true}` drops the probing check and rejects requests that ask for it.
 
-It asks for the minimum permissions: `activeTab` (the current tab's URL, only when you click) and access to Vigil's own API. It never scans in the background.
+It asks for the minimum permissions: `activeTab` (the current tab's URL, only when you click) and access to Vigil's own API. It never scans in the background, and it sends only the site's origin (`https://example.com`), never the page path or query string. See the [privacy policy](PRIVACY.md); the Chrome Web Store listing and images are in [`docs/store/`](docs/store/LISTING.md).
 
 To try it: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the `extension/` folder. To point it at another deployment, change `API` in `extension/popup.js` and `host_permissions` in `manifest.json`.
 
