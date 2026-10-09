@@ -15,8 +15,7 @@ body::before { content:""; position:fixed; inset:0; z-index:-1; pointer-events:n
 
 .nav { position:absolute; top:0; left:0; right:0; z-index:2; max-width:1040px; margin:0 auto; padding:22px 20px; display:flex; align-items:center; justify-content:space-between }
 .brand { display:flex; align-items:center; gap:10px; font-weight:800; font-size:20px; letter-spacing:.14em; text-transform:uppercase }
-.mark { width:26px; height:26px; border-radius:50%; border:3px solid var(--ink);
-        background:radial-gradient(circle, var(--accent) 0 30%, transparent 32%) }
+.mark { width:34px; height:22px; flex:none }
 .nav-tag { font-size:13px; color:var(--muted); letter-spacing:.04em }
 
 main { position:relative; max-width:880px; margin:0 auto; padding:0 20px 80px }
