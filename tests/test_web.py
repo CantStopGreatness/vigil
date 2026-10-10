@@ -113,7 +113,8 @@ def test_rate_limit(client, monkeypatch):
 
 
 def test_index_served(client):
-    assert "Vigil" in client.get("/").text
+    html = client.get("/").text
+    assert "Vigil" in html and 'href="/privacy"' in html
 
 
 def test_privacy_policy_served(client):
