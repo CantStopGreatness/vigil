@@ -117,6 +117,11 @@ def test_index_served(client):
     assert "Vigil" in html and 'href="/privacy"' in html
 
 
+def test_favicon_ico_served(client):
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
 def test_privacy_policy_served(client):
     r = client.get("/privacy")
     assert r.status_code == 200 and "Privacy Policy" in r.text and "Content-Security-Policy" in r.headers

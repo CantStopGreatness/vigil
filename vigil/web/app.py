@@ -23,7 +23,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -138,6 +138,11 @@ def index(request: Request) -> HTMLResponse:
     # Link previews need absolute URLs, so fill in this deployment's own origin (escaped: Host is client-sent).
     origin = html.escape(str(request.base_url).rstrip("/"))
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__ORIGIN__", origin))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(STATIC / "favicon-32.png", media_type="image/png")
 
 
 @app.get("/privacy", include_in_schema=False)
