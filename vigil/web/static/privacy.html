@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Privacy Policy · Vigil</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="doc">
+<p><a href="/">← Vigil</a></p>
+<h1>Privacy Policy</h1>
+<p><em>Last updated: 10 October 2026</em></p>
+
+<p>This policy covers the <strong>Vigil Chrome extension</strong> and the <strong>Vigil website</strong> (<a href="https://vigil-psi-liard.vercel.app">vigil-psi-liard.vercel.app</a>). Vigil is an open-source website security scanner; all of its code is public at <a href="https://github.com/CantStopGreatness/vigil">github.com/CantStopGreatness/vigil</a>.</p>
+
+<h2>The short version</h2>
+<ul>
+<li>The extension does nothing until you click its icon. It never runs in the background and never reads your browsing history.</li>
+<li>When you click it, it sends <strong>only the address of the site you're on</strong> (for example <code>https://example.com</code>) to Vigil's server. The page path, query string, page content, cookies and form data never leave your browser.</li>
+<li>Vigil has no accounts, sells no data, shows no ads, and uses no tracking cookies.</li>
+</ul>
+
+<h2>What the extension sends</h2>
+<p>When you click the Vigil icon, the extension reads the current tab's URL (using Chrome's <code>activeTab</code> permission, which only grants access at the moment you click) and sends its <strong>origin</strong>, the scheme and host such as <code>https://example.com</code>, to <code>https://vigil-psi-liard.vercel.app/api/scans</code>.</p>
+<p>The extension does not collect or send:</p>
+<ul>
+<li>the rest of the URL (path, query string or fragment), which can contain private details such as tokens or search terms</li>
+<li>the content of the page, your cookies, passwords, form entries or keystrokes</li>
+<li>any other tabs, your browsing history, or anything when you haven't clicked the icon</li>
+</ul>
+<p>The extension stores nothing on your device.</p>
+
+<h2>What Vigil's server does with it</h2>
+<p>To grade the site, Vigil's server makes a few ordinary requests to that site's public address, the same requests any visitor's browser makes, plus public DNS lookups. Scans started from the extension are <strong>passive</strong>: they skip Vigil's checks for exposed files.</p>
+<p>The server keeps:</p>
+<ul>
+<li><strong>The scan report</strong>: the site's address, its grade and the findings. It is stored under a random, unguessable link and deleted automatically after <strong>30 days</strong>. Anyone you share that link with can view the report. Reports are never listed publicly.</li>
+<li><strong>A short-lived rate-limit counter</strong>: your IP address (or, for IPv6, its network prefix) is used as a counter key to limit how many scans one visitor can run per minute. The counter expires within <strong>2 minutes</strong>.</li>
+</ul>
+<p>Vigil does not build profiles, link scans to individuals, or use the data for anything other than producing the report you asked for.</p>
+
+<h2>Service providers</h2>
+<p>Vigil runs on infrastructure from a few providers, who process data only to run the service:</p>
+<ul>
+<li><strong>Vercel</strong> hosts the website and API. Like any web host, it handles requests (including your IP address) and keeps standard request logs under its own retention policy. See <a href="https://vercel.com/legal/privacy-policy">Vercel's privacy policy</a>.</li>
+<li><strong>Upstash</strong> stores scan reports and rate-limit counters (Redis). See <a href="https://upstash.com/trust/privacy.pdf">Upstash's privacy policy</a>.</li>
+<li><strong>The National Vulnerability Database (NIST)</strong>: when a scanned site reveals software versions, Vigil looks those product names and versions up to find known vulnerabilities. Nothing about you is sent.</li>
+</ul>
+
+<h2>The website</h2>
+<p>In addition to the above, the website:</p>
+<ul>
+<li>keeps your recent scans and chosen report options in your own browser's local storage. They never leave your device, and clearing your browser data removes them.</li>
+<li>uses <strong>Vercel Web Analytics and Speed Insights</strong> to count page views and measure page speed. These are cookieless and report aggregated, anonymised statistics.</li>
+</ul>
+
+<h2>Your choices</h2>
+<ul>
+<li>Don't click the extension icon on a site you don't want graded. Nothing is sent otherwise.</li>
+<li>Remove the extension at any time from <code>chrome://extensions</code>.</li>
+<li>To have a report deleted before its 30 days are up, open an issue (below) with the report link.</li>
+</ul>
+
+<h2>Children</h2>
+<p>Vigil is a tool for website owners and developers. It isn't directed at children and doesn't knowingly collect information from them.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the updated version will be published at this address with a new "Last updated" date. The full history of changes is visible in the repository.</p>
+
+<h2>Contact</h2>
+<p>Questions or requests: open an issue at <a href="https://github.com/CantStopGreatness/vigil/issues">github.com/CantStopGreatness/vigil/issues</a>.</p>
+</main>
+</body>
+</html>

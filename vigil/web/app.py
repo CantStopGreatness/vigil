@@ -140,6 +140,11 @@ def index(request: Request) -> HTMLResponse:
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8").replace("__ORIGIN__", origin))
 
 
+@app.get("/privacy", include_in_schema=False)
+def privacy() -> HTMLResponse:
+    return HTMLResponse((STATIC / "privacy.html").read_text(encoding="utf-8"))
+
+
 @app.post("/api/scans")
 async def create_scan(body: ScanRequest, request: Request) -> dict:
     if not body.authorized and not body.passive:
