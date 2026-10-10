@@ -116,6 +116,11 @@ def test_index_served(client):
     assert "Vigil" in client.get("/").text
 
 
+def test_privacy_policy_served(client):
+    r = client.get("/privacy")
+    assert r.status_code == 200 and "Privacy Policy" in r.text and "Content-Security-Policy" in r.headers
+
+
 def test_security_txt_only_when_configured(client, monkeypatch):
     assert client.get("/.well-known/security.txt").status_code == 404
     monkeypatch.setattr(webapp, "SECURITY_CONTACT", "mailto:sec@example.com")

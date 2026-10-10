@@ -75,9 +75,9 @@ The extension sends the origin (e.g. `https://example.com`) of the page the user
 - I do not use or transfer user data for purposes that are unrelated to my item's single purpose
 - I do not use or transfer user data to determine creditworthiness or for lending purposes
 
-**Privacy policy URL:** https://github.com/CantStopGreatness/vigil/blob/main/PRIVACY.md
+**Privacy policy URL:** https://vigil-psi-liard.vercel.app/privacy
 
 ## Before you submit
 
-- Merge the branch with this file first, so the privacy policy URL above resolves.
-- If you move Vigil to a custom domain, update `API` in `extension/popup.js`, `host_permissions` in `manifest.json`, and the URLs here and in `PRIVACY.md`.
+- Deploy to production first, so the privacy policy URL above resolves.
+- If you move Vigil to a custom domain, update `API` in `extension/popup.js`, `host_permissions` in `manifest.json`, and the URLs here, in `PRIVACY.md` and in `vigil/web/static/privacy.html`.
