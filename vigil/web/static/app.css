@@ -200,7 +200,6 @@ a { color:var(--accent-text); text-decoration:none; transition:color .2s var(--e
 /* Long-form pages (privacy policy). */
 .doc { max-width:720px; padding-top:40px }
 .doc h1 { margin:12px 0 4px; max-width:none; font-size:clamp(30px,5vw,42px) }
-.doc h2 { margin:32px 0 8px }
+.doc h2 { font-size:20px; margin:32px 0 8px }
 .doc p, .doc li { color:var(--muted) }
 .doc strong { color:var(--ink) }
-.site-foot { text-align:center; padding:0 20px 40px; font-size:13px }
