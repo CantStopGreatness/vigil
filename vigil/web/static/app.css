@@ -146,7 +146,7 @@ td,th { text-align:left; padding:12px 14px; border-bottom:1px solid var(--line) 
 tbody tr:last-child td { border-bottom:0 }
 th { color:var(--muted); font-weight:600; font-size:12px; letter-spacing:.08em; text-transform:uppercase }
 tbody tr { transition:background-color .2s var(--ease) } tbody tr:hover { background:rgba(255,255,255,.04) }
-td.t { word-break:break-all } td.links { white-space:nowrap }
+td.t { overflow-wrap:anywhere } td.links { white-space:nowrap }
 a { color:var(--accent-text); text-decoration:none; transition:color .2s var(--ease) } a:hover { color:var(--ink) }
 
 .report-panel { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between;
@@ -190,6 +190,12 @@ a { color:var(--accent-text); text-decoration:none; transition:color .2s var(--e
   .report-actions, .report-actions .btn { width:100% }
   #preview { width:100vw; height:100dvh; border-radius:0; border:0 }
   .preview-bar .report-actions { width:auto } .preview-bar .report-actions .btn { width:auto }
+  /* History rows become small stacked cards: grade on the left; address, date and links beside it. */
+  thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%) }
+  tbody tr { display:grid; grid-template-columns:3.5em 1fr; gap:2px 14px; padding:14px 16px; border-bottom:1px solid var(--line) }
+  tbody tr:last-child { border-bottom:0 }
+  tbody td { padding:0; border:0 }
+  tbody td:first-child { grid-row:span 3 }
 }
 @media (prefers-reduced-motion:reduce) {
   *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition:none !important }

@@ -153,7 +153,7 @@ function loadHistory() {
   $("#hist").replaceChildren(...readHistory().map((s) => el("tr", {},
     el("td", {}, el("strong", {}, s.grade), ` ${s.score}`),
     el("td", { class: "t" }, s.target),
-    el("td", { class: "muted" }, new Date(s.created_at).toLocaleString()),
+    el("td", { class: "muted" }, new Date(s.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })),
     el("td", { class: "links" },
       reportLink(s.id, ".pdf", { download: "" }, "PDF"), " · ",
       reportLink(s.id, ".docx", { download: "" }, "Word"), " · ",
