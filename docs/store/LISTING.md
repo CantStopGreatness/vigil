@@ -15,7 +15,7 @@ Upload `vigil-extension.zip`. Bump `version` in `extension/manifest.json` for ev
 **Name** (from the manifest): Vigil: Website Security Grade
 
 **Summary** (from the manifest, 132 characters max):
-Grade the site you're on in seconds: security headers, TLS, cookies, known CVEs and email spoofing, with a fix for every finding.
+Find the security holes in the site you're on (HTTPS, headers, cookies, known vulnerabilities, email spoofing) and how to fix them.
 
 **Category:** Developer Tools
 **Language:** English
@@ -23,9 +23,9 @@ Grade the site you're on in seconds: security headers, TLS, cookies, known CVEs 
 **Description:**
 
 ```
-Click the Vigil eye on any website and get an A–F security grade in seconds, with a plain-English fix for every problem it finds.
+Click the Vigil eye on any website to see how well it's protected. You get a grade from A to F, a list of the problems Vigil found, and how to fix each one.
 
-WHAT IT CHECKS
+What it checks
 • Security headers: HSTS, Content-Security-Policy, clickjacking protection, MIME sniffing, Referrer-Policy and more
 • HTTPS and TLS: plain-HTTP pages, missing redirects, invalid or expiring certificates, obsolete TLS 1.0/1.1
 • Cookies: missing Secure, HttpOnly and SameSite flags
@@ -33,12 +33,12 @@ WHAT IT CHECKS
 • Information disclosure: version banners in headers and page markup
 • Email spoofing: missing or weak SPF and DMARC records
 
-WHAT YOU GET
+What you get
 • A 0–100 score and A–F grade
-• Every finding ranked by severity, with what's wrong, the evidence, and exactly how to fix it
-• A full online report and a ready-to-share PDF
+• Every problem sorted by how serious it is, with what's wrong, what Vigil saw, and how to fix it
+• A full report online, plus a PDF you can send to whoever runs the site
 
-PASSIVE AND PRIVATE BY DESIGN
+What it doesn't do
 • Vigil only reads what the site already shows every visitor. It never probes for hidden files or sends attack payloads. For a deeper audit of a site you own, the extension links to the full scanner.
 • It does nothing until you click the icon, and never runs in the background.
 • Only the site's address (like https://example.com) is sent, never the page path, its content, your cookies or your browsing history.

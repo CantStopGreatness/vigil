@@ -1,6 +1,6 @@
 # Vigil
 
-**Website security posture scanner.** Point it at a domain and in a few seconds you get a graded report covering security headers, TLS, cookies, exposed secrets, known CVEs in the software it runs, and email-spoofing protection, with a plain-English fix for every finding.
+**A website security scanner.** Give it a domain and it checks the security headers, TLS, cookies, exposed files, known vulnerabilities in the software the site runs, and email-spoofing protection. You get a grade from A to F and a fix for each problem it finds.
 
 ![CI](https://github.com/CantStopGreatness/vigil/actions/workflows/ci.yml/badge.svg)
 

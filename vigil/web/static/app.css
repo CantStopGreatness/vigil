@@ -20,9 +20,8 @@ body::before { content:""; position:fixed; inset:0; z-index:-1; pointer-events:n
 
 main { position:relative; max-width:880px; margin:0 auto; padding:0 20px 80px }
 .hero { position:relative; text-align:center }
-.eyebrow { color:var(--accent-text); font-size:12px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; margin:0 0 14px }
-h1 { font-size:clamp(34px,6vw,56px); line-height:1.05; font-weight:800; letter-spacing:-.02em; margin:0 auto; max-width:14ch }
-h1 span { color:var(--accent-text) }
+h1 { font-size:clamp(34px,6vw,56px); line-height:1.05; font-weight:800; letter-spacing:-.02em; margin:0 auto; max-width:16ch; text-wrap:balance }
+h1 span { color:var(--accent-text); white-space:nowrap }
 .tag { color:var(--muted); margin:16px auto 30px; max-width:52ch; font-size:16px }
 
 /* Dome security camera: the lens swings between fixed positions, holding at each one.
