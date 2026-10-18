@@ -76,7 +76,7 @@ function details(r) {
   body.append(el("div", { class: "report-panel" },
     el("div", { class: "report-copy" },
       el("strong", {}, "Get the full report"),
-      el("span", { class: "muted" }, "A ready-to-share document, formatted with your report options above.")),
+      el("span", { class: "muted" }, "A PDF or Word file you can send to whoever runs the site. It follows the report options above.")),
     el("div", { class: "report-actions" },
       el("button", { class: "btn btn-primary", type: "button", "data-preview": r.id }, "Preview report"),
       reportLink(r.id, ".pdf", { class: "btn btn-secondary", download: "" }, "⬇ Download PDF"),

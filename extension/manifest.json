@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vigil: Website Security Grade",
   "version": "0.1.0",
-  "description": "Grade the site you're on in seconds: security headers, TLS, cookies, known CVEs and email spoofing, with a fix for every finding.",
+  "description": "Find the security holes in the site you're on (HTTPS, headers, cookies, known vulnerabilities, email spoofing) and how to fix them.",
   "action": {
     "default_title": "Grade this site with Vigil",
     "default_popup": "popup.html",

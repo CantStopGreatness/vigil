@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Vigil · Website Security Scanner</title>
-<meta name="description" content="Grade any website's security in seconds: headers, TLS, cookies, exposed files, known CVEs and email spoofing, with a plain-English fix and a ready-to-share PDF report.">
+<meta name="description" content="Vigil checks a website's HTTPS, security headers, cookies, exposed files, known vulnerabilities and email settings, grades it from A to F, and tells you how to fix each problem. Download the results as a PDF or Word report.">
 <link rel="icon" href="/static/favicon.svg?v=2" type="image/svg+xml">
 <link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Vigil · Website security, graded in seconds">
-<meta property="og:description" content="Headers, TLS, cookies, exposed files, known CVEs and email spoofing, with a plain-English fix for every finding.">
+<meta property="og:title" content="Vigil · Find the security holes in your website">
+<meta property="og:description" content="Checks HTTPS, headers, cookies, exposed files, known vulnerabilities and email spoofing, then tells you how to fix each problem.">
 <meta property="og:url" content="__ORIGIN__/">
 <meta property="og:image" content="__ORIGIN__/static/og.png">
 <meta property="og:image:width" content="1200">
@@ -87,9 +87,8 @@
   <section class="hero">
 
 
-    <p class="eyebrow">Passive · Non-destructive scanning</p>
-    <h1>Website security,<br><span>graded in seconds</span></h1>
-    <p class="tag">Check a website's security headers, TLS, cookies, exposed files and email-spoofing protection.</p>
+    <h1>Find the <span>security holes</span> in your website</h1>
+    <p class="tag">Enter a web address. Vigil checks its HTTPS, headers, cookies, exposed files and email settings, grades it from A to F, and tells you how to fix each problem.</p>
 
     <form id="f">
       <div class="row">
@@ -143,8 +142,8 @@
         </div>
       </details>
 
-      <label class="auth"><input id="auth" type="checkbox"> I own these sites or have permission to test them.
-        Scans are passive and non-destructive, but they do request a handful of well-known file paths.</label>
+      <label class="auth"><input id="auth" type="checkbox"> <span>I own these sites or have permission to test them.
+        Vigil only reads the site and never changes anything, but it does ask for a few files that shouldn't be public, like <code>/.env</code>.</span></label>
       <div id="err" class="err" role="alert"></div>
     </form>
   </section>
